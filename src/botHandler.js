@@ -724,6 +724,29 @@ export async function handleIncomingMessage(sock, m) {
     return;
   }
 
+  // Command #suara / suara / #seksi / seksi (Mengubah / Mengatur Seksi Suara)
+  if (cleanText.startsWith('#suara') || cleanText.startsWith('suara') || cleanText.startsWith('#seksi') || cleanText.startsWith('seksi')) {
+    const param = rawText.replace(/^#?(suara|seksi)/i, '').trim();
+    if (param) {
+      const choice = parseSectionChoice(param);
+      if (choice !== 'UNKNOWN') {
+        memberManager.registerOrUpdate(effectivePhone, knownName || 'Anggota', choice);
+        await sendMessage(sock, remoteJid, `✅ Seksi suara Anda berhasil diatur ke: *${choice}*! 🎶`);
+        return;
+      }
+    }
+
+    session.step = 'WAITING_SECTION_REGISTRATION';
+    session.data.nama = knownName || 'Saudara/i';
+    session.data.namaAcara = currentEvent.namaAcara;
+    session.data.tanggalLatihan = currentEvent.waktuLatihan;
+    stateManager.updateSession(sessionKey, session);
+
+    const askMsg = messageTemplates.getAskSectionMessage(knownName || 'Saudara/i');
+    await sendMessage(sock, remoteJid, askMsg);
+    return;
+  }
+
   // Command reset / batal
   if (cleanText === 'ulang' || cleanText === 'reset' || cleanText === '/batal' || cleanText === 'batal') {
     stateManager.clearSession(sessionKey);
@@ -743,26 +766,14 @@ export async function handleIncomingMessage(sock, m) {
       if (!userIsAdmin && !hasValidMemberName) {
         const inputName = cleanNameInput(rawText);
         if (isValidName(inputName) && !isGenericGreeting) {
-          memberManager.registerOrUpdate(effectivePhone, inputName, 'Umum', 'NHKBP Kayu Putih');
           session.data.nama = inputName;
           session.data.namaAcara = currentEvent.namaAcara;
           session.data.tanggalLatihan = currentEvent.waktuLatihan;
-          session.step = 'WAITING_ATTENDANCE';
+          session.step = 'WAITING_SECTION_REGISTRATION';
           stateManager.updateSession(sessionKey, session);
 
-          const greetDirectNameMsg =
-            `Senang berkenalan dengan Kak *${inputName}*! ✨\n` +
-            `Data nama Kakak sudah tersimpan di database Naposo HKBP Kayu Putih.\n\n` +
-            `Untuk persiapan *${currentEvent.namaAcara}*:\n` +
-            `🗓️ *Waktu:* ${currentEvent.waktuLatihan}\n` +
-            `📍 *Lokasi:* ${currentEvent.lokasi}\n` +
-            `🎯 *Tujuan:* ${currentEvent.tujuan}\n\n` +
-            `*Apakah Kak ${inputName} bisa hadir latihan?*\n\n` +
-            `Silakan balas dengan angka atau kata:\n` +
-            `*1.* Bisa Hadir ✅\n` +
-            `*2.* Tidak Bisa Hadir ❌`;
-
-          await sendMessage(sock, remoteJid, greetDirectNameMsg);
+          const askSectionDirectMsg = messageTemplates.getAskSectionMessage(inputName);
+          await sendMessage(sock, remoteJid, askSectionDirectMsg);
           return;
         }
 
@@ -780,6 +791,19 @@ export async function handleIncomingMessage(sock, m) {
         const adminHint = userIsAdmin ? `\n\n_(💡 Anda login sebagai Admin. Ketik *help* atau */help* untuk menu perintah admin)_` : '';
         const alreadyMsg = messageTemplates.getAlreadyRespondedGreeting(knownName || 'Saudara/i', currentEvent, existingAttendance) + adminHint;
         await sendMessage(sock, remoteJid, alreadyMsg);
+        return;
+      }
+
+      // Jika anggota belum memilih seksi suara spesifik (masih Umum) dan bukan admin
+      if (!userIsAdmin && (!member?.seksi || member.seksi.toLowerCase() === 'umum')) {
+        session.step = 'WAITING_SECTION_REGISTRATION';
+        session.data.nama = knownName || 'Saudara/i';
+        session.data.namaAcara = currentEvent.namaAcara;
+        session.data.tanggalLatihan = currentEvent.waktuLatihan;
+        stateManager.updateSession(sessionKey, session);
+
+        const askSectionMsg = messageTemplates.getAskSectionMessage(knownName || 'Saudara/i');
+        await sendMessage(sock, remoteJid, askSectionMsg);
         return;
       }
 
