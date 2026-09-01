@@ -29,11 +29,48 @@ export const messageTemplates = {
       `• *riwayat* - Lihat riwayat acara & kehadiran lampau\n\n` +
       `*👥 Pengaturan Anggota & Grup:*\n` +
       `• *gruplist* - Lihat semua grup WA yang diikuti bot\n` +
-      `• *syncgroup [No]* - Impor nomor anggota dari grup\n\n` +
+      `• *syncgroup [No]* - Impor nomor anggota dari grup\n` +
+      `• *anggota* - Lihat daftar nama & seksi anggota (bisa: *anggota Sopran*, *anggota Tenor*, dsb.)\n\n` +
       `*📊 Laporan & Monitoring:*\n` +
       `• *rekap* - Lihat rekap kehadiran real-time\n` +
       `• *pending* - Lihat anggota yang BELUM membalas`
     );
+  },
+
+  /**
+   * Tanya pilihan seksi suara saat registrasi anggota baru
+   */
+  getAskSectionMessage(name) {
+    return (
+      `Senang berkenalan dengan Kak *${name}*! ✨\n\n` +
+      `Boleh tahu Kakak bertugas di bagian seksi suara / pelayanan apa ya? 🎶\n\n` +
+      `Silakan balas dengan angka atau kata:\n` +
+      `*1.* Sopran 🎼\n` +
+      `*2.* Alto 🎶\n` +
+      `*3.* Tenor 🎤\n` +
+      `*4.* Bass 🎵\n` +
+      `*5.* Pemusik / Tim Musik 🎹\n` +
+      `*6.* Umum / Jemaat`
+    );
+  },
+
+  /**
+   * Daftar anggota per seksi
+   */
+  getMemberListMessage(members, filterTag = 'all') {
+    if (!members || members.length === 0) {
+      return `👥 *DAFTAR ANGGOTA [${filterTag.toUpperCase()}]*\n\nTidak ada anggota yang ditemukan.`;
+    }
+
+    let msg = `👥 *DAFTAR ANGGOTA TERDAFTAR [${filterTag.toUpperCase()}] (${members.length} Orang):*\n\n`;
+    const preview = members.slice(0, 30);
+    preview.forEach((m, idx) => {
+      msg += `*${idx + 1}.* ${m.name || '(Belum input nama)'} (${m.phone}) - [${m.seksi || 'Umum'}]\n`;
+    });
+    if (members.length > 30) {
+      msg += `\n_... dan ${members.length - 30} anggota lainnya._`;
+    }
+    return msg;
   },
 
   /**

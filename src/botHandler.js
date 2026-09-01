@@ -4,7 +4,7 @@ import { sendToGoogleSheets } from './sheetsService.js';
 import { eventManager } from './eventManager.js';
 import { memberManager } from './memberManager.js';
 import { attendanceTracker } from './attendanceTracker.js';
-import { parseAttendanceChoice, parseTimeChoice } from './responseParser.js';
+import { parseAttendanceChoice, parseTimeChoice, parseSectionChoice } from './responseParser.js';
 import { messageTemplates } from './messageTemplates.js';
 import { broadcastService } from './broadcastService.js';
 import { logger } from './logger.js';
@@ -545,6 +545,15 @@ export async function handleIncomingMessage(sock, m) {
       return;
     }
 
+    // anggota / /anggota [seksi] / member / /member
+    if (cleanText.startsWith('/anggota') || cleanText.startsWith('anggota') || cleanText.startsWith('/member') || cleanText.startsWith('member')) {
+      const tag = cleanText.replace(/^\/?(anggota|member)/i, '').trim() || 'all';
+      const members = memberManager.getMembersByTag(tag);
+      const msg = messageTemplates.getMemberListMessage(members, tag);
+      await sendMessage(sock, remoteJid, msg);
+      return;
+    }
+
     // riwayat / /riwayat [ID]
     if (cleanText.startsWith('/riwayat') || cleanText.startsWith('riwayat')) {
       const param = cleanText.replace(/^\/?riwayat/i, '').trim();
@@ -760,21 +769,46 @@ export async function handleIncomingMessage(sock, m) {
         return;
       }
 
-      memberManager.registerOrUpdate(effectivePhone, inputName, 'Umum', 'NHKBP Kayu Putih');
       session.data.nama = inputName;
       session.data.namaAcara = currentEvent.namaAcara;
       session.data.tanggalLatihan = currentEvent.waktuLatihan;
+      session.step = 'WAITING_SECTION_REGISTRATION';
+      stateManager.updateSession(sessionKey, session);
+
+      const askSectionMsg = messageTemplates.getAskSectionMessage(inputName);
+      await sendMessage(sock, remoteJid, askSectionMsg);
+      break;
+    }
+
+    case 'WAITING_SECTION_REGISTRATION': {
+      const sectionChoice = parseSectionChoice(rawText);
+      if (sectionChoice === 'UNKNOWN') {
+        await sendMessage(
+          sock,
+          remoteJid,
+          `Mohon pilih seksi suara Anda dengan angka atau kata:\n` +
+          `*1.* Sopran 🎼\n` +
+          `*2.* Alto 🎶\n` +
+          `*3.* Tenor 🎤\n` +
+          `*4.* Bass 🎵\n` +
+          `*5.* Pemusik 🎹\n` +
+          `*6.* Umum / Jemaat`
+        );
+        return;
+      }
+
+      memberManager.registerOrUpdate(effectivePhone, session.data.nama, sectionChoice, 'NHKBP Kayu Putih');
+      session.data.seksi = sectionChoice;
       session.step = 'WAITING_ATTENDANCE';
       stateManager.updateSession(sessionKey, session);
 
       const greetNewMemberMsg =
-        `Senang berkenalan dengan Kak *${inputName}*! ✨\n` +
-        `Data nama Kakak sudah tersimpan di database Naposo HKBP Kayu Putih.\n\n` +
+        `Pilihan seksi suara Kak *${session.data.nama}* berhasil dicatat: *${sectionChoice}*! ✨\n\n` +
         `Untuk persiapan *${currentEvent.namaAcara}*:\n` +
         `🗓️ *Waktu:* ${currentEvent.waktuLatihan}\n` +
         `📍 *Lokasi:* ${currentEvent.lokasi}\n` +
         `🎯 *Tujuan:* ${currentEvent.tujuan}\n\n` +
-        `*Apakah Kak ${inputName} bisa hadir latihan?*\n\n` +
+        `*Apakah Kak ${session.data.nama} bisa hadir latihan?*\n\n` +
         `Silakan balas dengan angka atau kata:\n` +
         `*1.* Bisa Hadir ✅\n` +
         `*2.* Tidak Bisa Hadir ❌`;

@@ -75,3 +75,17 @@ export function parseTimeChoice(rawText) {
 
   return 'UNKNOWN';
 }
+
+export function parseSectionChoice(rawText) {
+  if (!rawText) return 'UNKNOWN';
+  const text = rawText.toLowerCase().trim();
+
+  if (text === '1' || text.includes('sopran') || text.includes('soprano')) return 'Sopran';
+  if (text === '2' || text.includes('alto')) return 'Alto';
+  if (text === '3' || text.includes('tenor')) return 'Tenor';
+  if (text === '4' || text.includes('bass') || text.includes('bas')) return 'Bass';
+  if (text === '5' || text.includes('musik') || text.includes('pemusik') || text.includes('musisi')) return 'Pemusik';
+  if (text === '6' || text.includes('umum') || text.includes('jemaat') || text.includes('belum')) return 'Umum';
+
+  return 'UNKNOWN';
+}

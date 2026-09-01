@@ -17,7 +17,7 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
   });
 
   // Setup data pengujian
-  const adminPhone = '6281281277599';
+  const adminPhone = '6281200000001';
   const adminJid = `${adminPhone}@s.whatsapp.net`;
   const memberPhone = '6289912345678';
   const memberJid = `${memberPhone}@s.whatsapp.net`;
@@ -103,7 +103,7 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
     assert.strictEqual(r.includes('DIBUKA KEMBALI'), true);
   });
 
-  await t.test('6. Alur Pendaftaran Anggota Baru & Validasi Nama', async () => {
+  await t.test('6. Alur Pendaftaran Anggota Baru, Validasi Nama & Pilihan Seksi Suara', async () => {
     stateManager.clearSession(memberJid);
     db.prepare('DELETE FROM members WHERE phone = ?').run(memberPhone);
 
@@ -118,10 +118,19 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
     r = await sendMsg(memberJid, '1,2');
     assert.strictEqual(r.includes('Mohon masukkan nama lengkap Anda yang jelas'), true);
 
-    // Masukkan nama valid
+    // Masukkan nama valid -> Bot tanya seksi suara
     r = await sendMsg(memberJid, 'Samuel Pasaribu');
     assert.strictEqual(r.includes('Samuel Pasaribu'), true);
+    assert.strictEqual(r.includes('seksi suara'), true);
+
+    // Masukkan pilihan seksi suara (Tenor)
+    r = await sendMsg(memberJid, 'Tenor');
+    assert.strictEqual(r.includes('Tenor'), true);
     assert.strictEqual(r.includes('Apakah Kak Samuel Pasaribu bisa hadir latihan?'), true);
+
+    // Verifikasi tersimpan di DB
+    const savedMember = memberManager.findMember(memberPhone);
+    assert.strictEqual(savedMember.seksi, 'Tenor');
   });
 
   await t.test('7. Alur Kehadiran (Bisa Hadir -> Telat -> Estimasi Waktu)', async () => {
