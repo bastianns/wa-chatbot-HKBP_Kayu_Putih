@@ -50,9 +50,10 @@ export const messageTemplates = {
       `• *absen* (atau *#absen*) - Isi konfirmasi kehadiran latihan aktif\n` +
       `• *#ubah* - Ubah konfirmasi kehadiran jika rencana berubah\n` +
       `• *#suara* - Atur/ganti seksi suara vokal (Sopran, Alto, Tenor, Bass, Pemusik)\n` +
+      `• *#peran* - Atur/ganti peran pelayanan (Anggota, Seksi Musik, Song Leader, dll.)\n` +
       `• *#nama [Nama Baru]* - Perbarui nama lengkap Anda\n` +
       `• *event* - Lihat jadwal & info latihan aktif saat ini\n\n` +
-      `💡 _Contoh cara ubah suara cepat:_ Ketik *#suara Tenor 1* atau *#suara Sopran 2*`
+      `💡 _Contoh cara cepat:_ Ketik *#suara Tenor 1* atau *#peran Song Leader*`
     );
   },
 
@@ -64,11 +65,11 @@ export const messageTemplates = {
   },
 
   /**
-   * Tampilan Profil Mandiri Anggota (Info Lengkap & Jelas, Bebas Clutter)
+   * Tampilan Profil Mandiri Anggota (Info Lengkap & Jelas)
    */
-  getMemberProfileMessage(name, phone, seksi, isAdmin, event, record) {
-    const adminTag = isAdmin ? ' _(Admin ⭐)_' : '';
+  getMemberProfileMessage(name, phone, seksi, isAdmin, event, record, peran = null) {
     const voiceSection = (seksi && seksi !== 'Umum' && seksi !== 'Pengurus') ? `*${seksi}*` : '_Belum ditentukan (Ketik #suara)_';
+    const roleText = peran || (isAdmin ? 'Pengurus / Admin ⭐' : 'Anggota Naposobulung');
 
     let statusText = '⚪ _Belum mengisi konfirmasi_';
     if (record) {
@@ -85,8 +86,9 @@ export const messageTemplates = {
       `👤 *PROFIL & STATUS LATIHAN*\n` +
       `🏛️ *NHKBP Kayu Putih*\n` +
       `------------------------------------\n` +
-      `• *Nama Lengkap:* ${name || '(Belum terdaftar)'}${adminTag}\n` +
-      `• *Seksi Suara:* ${voiceSection}\n\n` +
+      `• *Nama Lengkap:* ${name || '(Belum terdaftar)'}\n` +
+      `• *Seksi Suara:* ${voiceSection}\n` +
+      `• *Peran / Pelayanan:* *${roleText}*\n\n` +
       `*📅 Status Latihan Terdekat:*\n` +
       `• *Acara:* ${event ? event.namaAcara : 'Latihan Koor'}\n` +
       `• *Jadwal:* ${event ? event.waktuLatihan : '-'}\n` +
@@ -94,8 +96,29 @@ export const messageTemplates = {
       `------------------------------------\n\n` +
       `*✏️ Ingin Mengubah Data Anda?*\n` +
       `• Ketik *#suara* (atau *#suara Tenor 1*, *#suara Alto*) untuk ganti seksi suara\n` +
+      `• Ketik *#peran* (atau *#peran Song Leader*) untuk ganti peran pelayanan\n` +
       `• Ketik *#nama [Nama Baru]* untuk mengganti nama lengkap\n` +
       `• Ketik *#absen* (atau *#ubah*) untuk mengisi / mengubah kehadiran`
+    );
+  },
+
+  /**
+   * Tanya pilihan peran / pelayanan
+   */
+  getAskRoleMessage(name, currentRole = null) {
+    const prevInfo = currentRole ? `📌 _(Peran Kakak saat ini: *${currentRole}*)_\n\n` : '';
+
+    return (
+      `Halo Kak *${name}*! ✨\n\n` +
+      prevInfo +
+      `Silakan pilih peran / bidang pelayanan Kakak di NHKBP Kayu Putih:\n\n` +
+      `• *1.* Anggota Naposobulung\n` +
+      `• *2.* Seksi Rohani & Musik (Koor)\n` +
+      `• *3.* Pengurus / BPH\n` +
+      `• *4.* Song Leader / Dirigen\n` +
+      `• *5.* Pemusik / Tim Musik\n` +
+      `• *6.* Seksi Pelayanan Lainnya (Acara, Humas, Konsumsi, dll.)\n\n` +
+      `_(Balas dengan angka 1-6, atau langsung ketik peran Anda, contoh: *1*, *Song Leader*, atau *#peran Seksi Konsumsi*)_`
     );
   },
 

@@ -330,7 +330,8 @@ export async function handleIncomingMessage(sock, m) {
       member?.seksi,
       userIsAdmin,
       currentEvent,
-      att
+      att,
+      member?.peran
     );
     await sendMessage(sock, remoteJid, profileMsg);
     return;
@@ -773,6 +774,32 @@ export async function handleIncomingMessage(sock, m) {
     return;
   }
 
+  // Command #peran / peran (Mengubah Peran / Pelayanan)
+  if (cleanText.startsWith('#peran') || cleanText.startsWith('peran') || cleanText.startsWith('/peran')) {
+    const param = rawText.replace(/^[#/]?peran/i, '').trim();
+    if (param) {
+      let selectedRole = param;
+      if (param === '1') selectedRole = 'Anggota Naposobulung';
+      else if (param === '2') selectedRole = 'Seksi Rohani & Musik';
+      else if (param === '3') selectedRole = 'Pengurus / BPH';
+      else if (param === '4') selectedRole = 'Song Leader / Dirigen';
+      else if (param === '5') selectedRole = 'Pemusik / Tim Musik';
+      else if (param === '6') selectedRole = 'Seksi Pelayanan';
+
+      memberManager.updatePeran(effectivePhone, selectedRole);
+      await sendMessage(sock, remoteJid, `✅ Peran / Pelayanan Anda berhasil diperbarui menjadi: *${selectedRole}*! ✨\n\nKetik *profil* untuk melihat data terbaru.`);
+      return;
+    }
+
+    session.step = 'WAITING_ROLE_UPDATE';
+    session.data.nama = knownName || 'Saudara/i';
+    stateManager.updateSession(sessionKey, session);
+
+    const askRoleMsg = messageTemplates.getAskRoleMessage(knownName || 'Saudara/i', member?.peran);
+    await sendMessage(sock, remoteJid, askRoleMsg);
+    return;
+  }
+
   // Command #absen / absen / #ubah / ubah / edit / ganti (Mengisi atau Mengubah RSVP)
   if (cleanText === '#absen' || cleanText === 'absen' || cleanText === '/absen' || cleanText === '#ubah' || cleanText === 'ubah' || cleanText === 'edit' || cleanText === 'ganti') {
     stateManager.clearSession(sessionKey);
@@ -882,6 +909,22 @@ export async function handleIncomingMessage(sock, m) {
       }
 
       await sendMessage(sock, remoteJid, `✅ Nama lengkap Anda berhasil diperbarui menjadi: *${inputName}*! ✨\n\nData di rekap absensi telah disinkronkan.`);
+      break;
+    }
+
+    case 'WAITING_ROLE_UPDATE': {
+      let selectedRole = rawText.trim();
+      if (cleanText === '1') selectedRole = 'Anggota Naposobulung';
+      else if (cleanText === '2') selectedRole = 'Seksi Rohani & Musik';
+      else if (cleanText === '3') selectedRole = 'Pengurus / BPH';
+      else if (cleanText === '4') selectedRole = 'Song Leader / Dirigen';
+      else if (cleanText === '5') selectedRole = 'Pemusik / Tim Musik';
+      else if (cleanText === '6') selectedRole = 'Seksi Pelayanan';
+
+      memberManager.updatePeran(effectivePhone, selectedRole);
+      stateManager.clearSession(sessionKey);
+
+      await sendMessage(sock, remoteJid, `✅ Peran / Pelayanan Anda berhasil diperbarui menjadi: *${selectedRole}*! ✨\n\nKetik *profil* untuk melihat data terbaru.`);
       break;
     }
 

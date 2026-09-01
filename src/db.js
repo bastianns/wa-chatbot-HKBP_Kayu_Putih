@@ -52,6 +52,7 @@ export function createDatabase(dbPath = config.dbPath) {
       phone TEXT UNIQUE NOT NULL,
       name TEXT NOT NULL DEFAULT '',
       seksi TEXT NOT NULL DEFAULT 'Umum',
+      peran TEXT NOT NULL DEFAULT 'Anggota Naposobulung',
       grup_asal TEXT DEFAULT 'NHKBP Kayu Putih',
       is_admin INTEGER NOT NULL DEFAULT 0,
       registered_at TEXT NOT NULL,
@@ -111,6 +112,13 @@ export function createDatabase(dbPath = config.dbPath) {
     CREATE INDEX IF NOT EXISTS idx_lid_mappings_lid ON lid_mappings(lid);
     CREATE INDEX IF NOT EXISTS idx_broadcast_event_tag ON broadcast_progress(event_id, target_tag);
   `);
+
+  // Migrasi kolom peran jika belum ada
+  try {
+    db.exec(`ALTER TABLE members ADD COLUMN peran TEXT NOT NULL DEFAULT 'Anggota Naposobulung'`);
+  } catch (e) {
+    // Kolom sudah ada
+  }
 
   runIncrementalMigrations(db);
 

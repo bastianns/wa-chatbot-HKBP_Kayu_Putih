@@ -117,7 +117,7 @@ export class MemberManager {
   /**
    * Mendaftarkan atau memperbarui data anggota
    */
-  registerOrUpdate(phone, name, seksi = 'Umum', grupAsal = 'NHKBP Kayu Putih', isAdmin = null) {
+  registerOrUpdate(phone, name, seksi = 'Umum', grupAsal = 'NHKBP Kayu Putih', isAdmin = null, peran = null) {
     const normalized = this.normalizePhone(phone);
     if (!normalized) return null;
 
@@ -125,6 +125,7 @@ export class MemberManager {
     const existing = this.findMember(normalized);
 
     const isAdm = isAdmin !== null ? (isAdmin ? 1 : 0) : ((seksi === 'Pengurus') ? 1 : (existing?.is_admin || 0));
+    const role = peran || existing?.peran || (isAdm ? 'Pengurus / Admin' : 'Anggota Naposobulung');
 
     if (existing) {
       const updatedName = (name && name.length >= 2) ? name.trim() : existing.name;
@@ -133,17 +134,36 @@ export class MemberManager {
 
       this.db.prepare(`
         UPDATE members 
-        SET name = ?, seksi = ?, grup_asal = ?, is_admin = ?, updated_at = ?
+        SET name = ?, seksi = ?, peran = ?, grup_asal = ?, is_admin = ?, updated_at = ?
         WHERE phone = ?
-      `).run(updatedName, updatedSeksi, updatedGrup, isAdm, now, normalized);
+      `).run(updatedName, updatedSeksi, role, updatedGrup, isAdm, now, normalized);
     } else {
       this.db.prepare(`
-        INSERT INTO members (phone, name, seksi, grup_asal, is_admin, registered_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(normalized, (name || '').trim(), seksi || 'Umum', grupAsal || 'NHKBP Kayu Putih', isAdm, now, now);
+        INSERT INTO members (phone, name, seksi, peran, grup_asal, is_admin, registered_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(normalized, (name || '').trim(), seksi || 'Umum', role, grupAsal || 'NHKBP Kayu Putih', isAdm, now, now);
     }
 
     return this.findMember(normalized);
+  }
+
+  /**
+   * Mengubah peran / seksi pelayanan anggota secara spesifik
+   */
+  updatePeran(phone, peran) {
+    const normalized = this.normalizePhone(phone);
+    if (!normalized || !peran) return false;
+
+    const now = new Date().toISOString();
+    const isPengurus = /pengurus|bph|ketua|sekretaris|bendahara/i.test(peran);
+    
+    this.db.prepare(`
+      UPDATE members
+      SET peran = ?, is_admin = CASE WHEN ? = 1 THEN 1 ELSE is_admin END, updated_at = ?
+      WHERE phone = ?
+    `).run(peran.trim(), isPengurus ? 1 : 0, now, normalized);
+
+    return true;
   }
 
   /**

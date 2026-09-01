@@ -234,6 +234,18 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
     assert.strictEqual(m.name, 'Samuel Panjaitan');
   });
 
+  await t.test('16. Perintah Ubah Peran Pelayanan (#peran)', async () => {
+    stateManager.clearSession(memberJid);
+    const r = await sendMsg(memberJid, '#peran Song Leader');
+    assert.strictEqual(r.includes('berhasil diperbarui menjadi: *Song Leader*'), true);
+
+    const m = memberManager.findMember(memberPhone);
+    assert.strictEqual(m.peran, 'Song Leader');
+
+    const prof = await sendMsg(memberJid, 'profil');
+    assert.strictEqual(prof.includes('Peran / Pelayanan:* *Song Leader*'), true);
+  });
+
   // Bersihkan kembali setelah selesai
   db.prepare('DELETE FROM members WHERE phone IN (?, ?, ?)').run(adminPhone, memberPhone, strangerPhone);
   db.prepare('DELETE FROM sessions WHERE jid IN (?, ?, ?)').run(adminJid, memberJid, strangerJid);

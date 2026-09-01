@@ -44,6 +44,7 @@ Bot WhatsApp asisten absensi paduan suara & kegiatan interaktif berbasis **Node.
 | `absen` / `#absen` | Mengisi konfirmasi kehadiran latihan aktif | `absen` |
 | `#ubah` / `ubah` | Mengubah status kehadiran (jika ada halangan mendadak) | `#ubah` |
 | `#suara` / `suara` | Mengatur / mengubah seksi suara vokal koor | `#suara` atau `#suara Tenor 1` |
+| `#peran` / `peran` | Mengatur / mengubah peran atau seksi pelayanan | `#peran` atau `#peran Song Leader` |
 | `#nama` / `nama` | Mengubah nama lengkap resmi | `#nama Jonathan Panjaitan` |
 | `event` | Melihat info jadwal latihan aktif saat ini | `event` |
 | `batal` / `reset` | Me-reset sesi percakapan jika ingin mulai dari awal | `batal` |
