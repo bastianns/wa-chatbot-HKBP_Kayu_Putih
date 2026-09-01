@@ -1,26 +1,75 @@
 # 🤖 WhatsApp Bot Absensi Interaktif & Google Sheets (NHKBP Kayu Putih)
 
-Bot WhatsApp interaktif berbasis Node.js + Baileys + SQLite yang otomatis mencatat kehadiran latihan/kegiatan naposo langsung ke **Google Sheets** secara real-time.
+Bot WhatsApp asisten absensi paduan suara & kegiatan interaktif berbasis **Node.js + Baileys + SQLite** yang otomatis mendata kehadiran, memetakan seksi suara, dan mencatat data langsung ke **Google Sheets** secara real-time.
 
 ---
 
 ## 🌟 Fitur Utama & Keunggulan
 
 1. **Embedded SQLite Database (`better-sqlite3`)**:
-   - Penyimpanan data relasional cepat, bebas race-condition dengan WAL mode dan transaksi ACID, tanpa memerlukan server database eksternal terpisah.
-   - Otomatis melakukan migrasi data lama dari flat file JSON (`members.json`, `event_config.json`, `attendance_tracker.json`, `sessions.json`) dengan backup aman.
-2. **Keamanan & Validasi Ketat**:
-   - **Single Source of Truth Admin**: Nomor admin dipusatkan di database (`seksi: "Pengurus"` atau `is_admin = 1`) dan dicocokkan dengan *exact equality* pada nomor yang sudah dinormalisasi (bukan `.includes()`).
-   - **Allowlist Validasi Nama**: Menolak input sampah/spam (seperti *"Iya iya"*, *"1,2"*) dengan filter allowlist pola nama orang minimal 2 kata (`/^[a-zA-Z .'-]+$/`).
-   - **Formula Injection Prevention**: Field teks bebas (seperti alasan) di-escape secara otomatis sebelum dikirim ke Google Sheets.
-   - **Resolusi Identitas WhatsApp LID**: Verifikasi nomor HP eksplisit dan pemetaan permanen (`lid -> phone`) untuk mencegah tumpang tindih data.
-3. **Riwayat Acara Permanen (`/riwayat`)**:
-   - Setiap acara baru (`startNewEvent`) tidak lagi menghapus data absensi acara sebelumnya. Riwayat dapat dibandingkan kapan saja lewat command `/riwayat`.
-4. **Manajemen Acara & Broadcast Dinamis**:
-   - Template pesan dan penghitungan jumlah anggota terpusat (`messageTemplates.js`) dengan angka dinamis dari database.
-   - Script broadcast & reminder mendukung **resume otomatis** dan penandaan status terkirim hanya setelah pesan benar-benar sukses terkirim.
-5. **Percakapan Multi-Langkah (*State Machine*)**:
-   - Sapaan Nama $\rightarrow$ Hadir / Tidak $\rightarrow$ On-time / Telat + Estimasi Jam $\rightarrow$ Alasan jika absen $\rightarrow$ Fitur ganti status (`#ubah`).
+   - Penyimpanan data relasional cepat, bebas *race-condition* dengan mode WAL (*Write-Ahead Logging*) dan transaksi atomik ACID, tanpa perlu server database eksternal.
+   - Mendukung riwayat multi-acara permanen; data kehadiran latihan lampau tidak pernah terhapus atau tertimpa saat event baru dimulai.
+2. **Pengalaman Pengguna Ramah & Bebas Stres (*Stress-Free UX*)**:
+   - **Menu Bantuan Adaptif (`menu` / `help`)**: Tampilan otomatis menyesuaikan peran pengirim (menu simpel untuk anggota umum, menu pengurus lengkap untuk admin).
+   - **Profil Mandiri (`profil` / `saya`)**: Anggota dapat melihat fakta data diri, peran, seksi suara, dan status kehadiran latihan terdekat dalam 1 pesan rapi.
+   - **Edit Mandiri (*Self-Service*)**: Anggota dapat memperbarui nama (`#nama`), seksi suara (`#suara`), maupun kehadiran (`#ubah`) kapan saja.
+   - **Sapaan Cerdas (*Casual Greeting*)**: Tidak menodong pertanyaan secara kaku saat anggota mengirim salam santai (*"Halo"*, *"Pagi"*, *"Shalom"*).
+3. **Perekaman & Pemecahan Seksi Suara Koor (*Voice Section Allocation*)**:
+   - Mendukung pencatatan suara utama maupun alokasi suara pecahan:
+     - 🎼 **Sopran** (*Sopran 1*, *Sopran 2*)
+     - 🎶 **Alto** (*Alto 1*, *Alto 2*)
+     - 🎤 **Tenor** (*Tenor 1*, *Tenor 2*)
+     - 🎵 **Bass** (*Bass 1*, *Bass 2*)
+     - 🎹 **Pemusik / Tim Musik**
+     - 👥 **Umum / Jemaat**
+   - Mengingat suara latihan sebelumnya dan otomatis menyinkronkan perubahan suara ke Google Sheets & SQLite.
+4. **Keamanan & Validasi Ketat**:
+   - **Single Source of Truth Admin**: Hak akses admin dipusatkan di SQLite (`is_admin = 1` atau `seksi = 'Pengurus'`) dengan pencocokan eksklusif pada nomor yang dinormalisasi.
+   - **Allowlist Validasi Nama**: Menolak input sampah/spam dengan filter allowlist pola nama minimal 2 kata (`/^[a-zA-Z .'-]+$/`).
+   - **Formula Injection Prevention**: Field teks bebas otomatis di-escape sebelum dikirim ke spreadsheet (`=`, `+`, `-`, `@`, `\t`, `\r`).
+   - **Resolusi Identitas WhatsApp LID**: Verifikasi nomor HP eksplisit dan pemetaan permanen (`lid -> phone`).
+5. **Monitoring & Pencarian Admin Real-time**:
+   - Pencarian anggota spesifik (`cari [Nama/No]`), daftar anggota per seksi (`anggota [seksi]`), rekapitulasi (`rekap`), daftar pending (`pending`), dan arsip riwayat (`riwayat`).
+
+---
+
+## 📱 Panduan Perintah WhatsApp (Private Chat)
+
+### 👤 A. Perintah untuk Seluruh Anggota (Member & Pengurus)
+
+| Perintah | Fungsi | Contoh Penggunaan |
+| :--- | :--- | :--- |
+| `profil` / `saya` | Melihat fakta data diri & status kehadiran latihan terdekat | `profil` |
+| `menu` / `help` | Menampilkan panduan bantuan ramah anggota | `menu` |
+| `absen` / `#absen` | Mengisi konfirmasi kehadiran latihan aktif | `absen` |
+| `#ubah` / `ubah` | Mengubah status kehadiran (jika ada halangan mendadak) | `#ubah` |
+| `#suara` / `suara` | Mengatur / mengubah seksi suara vokal koor | `#suara` atau `#suara Tenor 1` |
+| `#nama` / `nama` | Mengubah nama lengkap resmi | `#nama Jonathan Panjaitan` |
+| `event` | Melihat info jadwal latihan aktif saat ini | `event` |
+| `batal` / `reset` | Me-reset sesi percakapan jika ingin mulai dari awal | `batal` |
+
+---
+
+### 🛠️ B. Perintah Khusus Admin / Pengurus (Seksi Rohani & Musik)
+
+Pengurus yang terdaftar di database dapat mengirimkan perintah administrasi berikut:
+
+| Kategori | Perintah | Fungsi | Contoh |
+| :--- | :--- | :--- | :--- |
+| **Broadcast** | `broadcast target` | Kirim pesan PC ke seluruh target koor | `broadcast target` |
+| | `broadcast pengurus`| Tes kirim pesan PC ke sesama admin | `broadcast pengurus` |
+| | `broadcast all` | Kirim pesan PC ke seluruh anggota di database | `broadcast all` |
+| | `remind` | Kirim pesan pengingat ke yang belum merespon | `remind` |
+| **Monitoring** | `rekap` | Rekapitulasi kehadiran real-time | `rekap` |
+| | `pending` | Daftar anggota target yang belum membalas | `pending` |
+| | `cari [Nama/No]` | Cari info anggota & status kehadirannya | `cari Maria` atau `cari 0812` |
+| | `anggota [seksi]` | Lihat daftar nama anggota per seksi suara | `anggota` atau `anggota Sopran` |
+| **Acara** | `setevent` | Buat / ubah jadwal latihan secara instan | `setevent Latihan Koor \| Kamis, 3 Sept 20.00 \| Gereja \| Pengisian Minggu` |
+| | `tutup` / `buka` | Kunci (*cut-off*) atau buka kembali absensi | `tutup` |
+| | `riwayat` | Lihat arsip daftar acara dan absensi lampau | `riwayat` atau `riwayat 1` |
+| | `umumkan` | Buat teks pengumuman siap share ke grup WA | `umumkan` |
+| **Grup WA** | `gruplist` | Lihat daftar grup WA yang diikuti bot | `gruplist` |
+| | `syncgroup [No]` | Impor kontak anggota dari grup WA | `syncgroup 1` |
 
 ---
 
@@ -29,26 +78,27 @@ Bot WhatsApp interaktif berbasis Node.js + Baileys + SQLite yang otomatis mencat
 ```text
 D:\wa-absensi-bot\
 ├── google-apps-script\
-│   └── Code.gs             # Kode Webhook untuk dipasang di Google Sheets
+│   └── Code.gs             # Kode Webhook terpasang di Google Sheets
 ├── src\
-│   ├── botHandler.js       # Logika percakapan, perintah admin & alur chat
+│   ├── botHandler.js       # Logika percakapan, perintah admin, profil & alur chat
 │   ├── broadcast.js        # Script broadcast aman CLI dengan resume support
 │   ├── broadcastService.js # Core service broadcast terpadu
 │   ├── db.js               # Inisialisasi SQLite database & migrasi otomatis
 │   ├── eventManager.js     # Pengelola konfigurasi acara & riwayat lampau
 │   ├── logger.js           # Structured logging terpusat
-│   ├── memberManager.js    # Pengelola kontak, hak akses admin & LID mapping
-│   ├── messageTemplates.js # Template pesan terpadu dengan counts dinamis
+│   ├── memberManager.js    # Pengelola kontak, hak akses admin, seksi & LID mapping
+│   ├── messageTemplates.js # Template pesan terpadu dengan counts dinamis & menu adaptif
 │   ├── remind.js           # Script follow-up / reminder anggota pending
-│   ├── responseParser.js   # Fuzzy & smart NLP response parser
+│   ├── responseParser.js   # Fuzzy & smart NLP response parser (kehadiran & seksi suara)
 │   ├── sheetsService.js    # Pengirim data ke Google Sheets + sanitasi formula
-│   └── stateManager.js     # Manajemen sesi chat per nomor WA di SQLite
+│   └── stateManager.js     # Manajemen sesi percakapan per nomor WA di SQLite
 ├── test\
-│   ├── admin.test.js       # Pengujian exact admin match & security
+│   ├── admin.test.js       # Pengujian exact admin match, seksi & search
 │   ├── broadcast.test.js   # Pengujian template dinamis & progress broadcast
-│   ├── conversation.test.js# Pengujian end-to-end alur percakapan bot
+│   ├── conversation.test.js# Pengujian end-to-end alur percakapan bot, profil & help
 │   ├── database.test.js    # Pengujian SQLite CRUD & riwayat event
 │   ├── lid.test.js         # Pengujian resolusi identitas LID permanen
+│   ├── multiprocess.test.js# Pengujian konkurensi SQLite multi-proses fisik
 │   ├── sanitization.test.js# Pengujian formula injection prevention
 │   └── validation.test.js  # Pengujian allowlist validasi nama
 ├── .env.example            # Template konfigurasi environment
@@ -62,46 +112,24 @@ D:\wa-absensi-bot\
 
 ---
 
-## 🛠️ Perintah Admin Lewat WhatsApp (Private Chat)
-
-Pengurus/Admin yang terdaftar di database dapat mengirimkan perintah berikut (bisa dengan tanda `/` ataupun tanpa `/`):
-
-| Perintah | Fungsi | Contoh |
-| :--- | :--- | :--- |
-| `/help` | Menampilkan menu panduan perintah admin | `/help` |
-| `/event` | Melihat detail acara latihan yang sedang aktif | `/event` |
-| `/setevent [Nama] \| [Waktu] \| [Lokasi] \| [Tujuan]` | Mengubah info latihan secara instan | `/setevent Latihan Koor Naposo \| Sabtu, 29 Agustus 2026 19.00 WIB \| Gereja HKBP Kayu Putih \| Pengisian Koor Minggu 30 Agustus 2026 Jam 10.00` |
-| `/rekap` | Melihat rekapitulasi kehadiran real-time | `/rekap` |
-| `/pending` | Melihat daftar anggota yang belum membalas | `/pending` |
-| `/riwayat` | Melihat daftar acara dan kehadiran lampau | `/riwayat` atau `/riwayat 1` |
-| `/tutup` | Menutup pengisian absensi (Cut-off) | `/tutup` |
-| `/buka` | Membuka kembali pengisian absensi | `/buka` |
-| `/broadcast [tag]` | Memulai pengiriman PC di background | `broadcast target` atau `broadcast all` |
-| `/remind` | Mengirim pesan follow-up ke yang pending | `/remind` |
-| `/gruplist` | Melihat daftar grup WA yang diikuti bot | `/gruplist` |
-| `/syncgroup [No]` | Menyinkronkan anggota dari grup WA | `/syncgroup 1` |
-| `/umumkan` atau `/link` | Membuat template pengumuman siap share ke grup | `/umumkan` |
-
----
-
-## 👥 Cara Broadcast via Terminal (CLI)
+## 👥 Penggunaan via Terminal (CLI)
 
 ```powershell
-# Preview / Dry-run tanpa mengirim pesan
-npm run broadcast -- target --dry-run
+# Jalankan bot utama
+npm start
+
+# Jalankan seluruh test suite (57 tests)
+npm test
 
 # Broadcast ke target khusus koor (TargetKoor)
 npm run broadcast -- target
 
-# Broadcast ke seluruh anggota terdaftar
+# Broadcast ke seluruh anggota
 npm run broadcast -- all
 
 # Broadcast khusus seksi tertentu
 npm run broadcast -- Sopran
-npm run broadcast -- Alto
 npm run broadcast -- Tenor
-npm run broadcast -- Bass
-npm run broadcast -- Pengurus
 
 # Mengirim reminder ke anggota yang belum merespon
 npm run remind
@@ -109,30 +137,17 @@ npm run remind
 
 ---
 
-## 🧪 Menjalankan Test Suite
+## 🚀 Panduan Setup & Deploy
 
-Proyek ini dilengkapi dengan unit & integration test menggunakan Node.js test runner bawaan (`node:test` + `node:assert/strict`):
-
-```powershell
-npm test
-```
-
----
-
-## 🚀 Panduan Setup & Keamanan
-
-1. **Pasang Script di Google Sheets**:
-   - Salin isi file [google-apps-script/Code.gs](file:///D:/wa-absensi-bot/google-apps-script/Code.gs) ke menu **Extensions > Apps Script** di Google Sheets Anda.
+1. **Pasang Webhook Google Apps Script**:
+   - Salin isi file [google-apps-script/Code.gs](file:///D:/wa-absensi-bot/google-apps-script/Code.gs) ke menu **Extensions > Apps Script** pada Google Sheets Anda.
    - Klik **Deploy > New Deployment > Web App** (*Who has access: Anyone*).
    - Salin URL Web App (`https://script.google.com/macros/s/.../exec`).
-2. **Isi File `.env`**:
+2. **Konfigurasi File `.env`**:
    - Salin [.env.example](file:///D:/wa-absensi-bot/.env.example) menjadi `.env`.
-   - Masukkan Webhook URL serta nomor HP admin Anda untuk emergency override (`ADMIN_NUMBERS=6281281277599`).
-3. **Peringatan Keamanan**:
-   - Pastikan file `.env`, `absensi.db`, dan file data anggota ada di `.gitignore` dan tidak pernah di-commit ke repositori publik.
-   - Jika URL Webhook Google Apps Script pernah dibagikan atau terekspos, **segera lakukan Redeploy Web App** di Google Apps Script untuk membuat URL baru.
-4. **Jalankan Bot**:
+   - Masukkan `GOOGLE_SHEETS_URL` dan nomor HP admin Anda (`ADMIN_NUMBERS=6281281277599`).
+3. **Jalankan Bot**:
    ```powershell
    npm start
    ```
-   Scan QR Code yang muncul menggunakan WhatsApp di HP Anda.
+   Scan QR Code yang muncul di terminal menggunakan aplikasi WhatsApp di HP Anda.
