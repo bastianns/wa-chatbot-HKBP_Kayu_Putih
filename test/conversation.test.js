@@ -16,6 +16,9 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
     json: async () => ({ status: 'success', message: 'mocked' })
   });
 
+  // Simpan state event asli agar tidak terpolusi oleh unit test
+  const originalEvent = eventManager.getEvent();
+
   // Setup data pengujian
   const adminPhone = '6281200000001';
   const adminJid = `${adminPhone}@s.whatsapp.net`;
@@ -73,7 +76,7 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
 
     r = await sendMsg(
       adminJid,
-      'setevent Latihan Paduan Suara Naposobulung | Sabtu, 29 Agustus 2026 - Pukul 19:00 WIB | Gereja HKBP Kayu Putih | Pengisian Koor Kebaktian Minggu, 30 Agustus 2026 (Pukul 10:00 WIB)'
+      'setevent Latihan Paduan Suara Naposobulung | Kamis, 3 September 2026 - Pukul 20:00 WIB | Gereja HKBP Kayu Putih | Pengisian Koor Kebaktian Minggu, 6 September 2026 (Pukul 10:00 WIB)'
     );
     assert.strictEqual(r.includes('BERHASIL DIPERBARUI'), true);
   });
@@ -250,4 +253,8 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
   db.prepare('DELETE FROM members WHERE phone IN (?, ?, ?)').run(adminPhone, memberPhone, strangerPhone);
   db.prepare('DELETE FROM sessions WHERE jid IN (?, ?, ?)').run(adminJid, memberJid, strangerJid);
   db.prepare('DELETE FROM attendance_records WHERE phone IN (?, ?, ?)').run(adminPhone, memberPhone, strangerPhone);
+
+  if (originalEvent) {
+    eventManager.updateEvent(originalEvent);
+  }
 });
