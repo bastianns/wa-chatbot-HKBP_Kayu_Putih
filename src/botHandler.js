@@ -814,8 +814,9 @@ export async function handleIncomingMessage(sock, m) {
         return;
       }
 
-      // Jika anggota belum memilih seksi suara spesifik (masih Umum) dan bukan admin
-      if (!userIsAdmin && (!member?.seksi || member.seksi.toLowerCase() === 'umum')) {
+      // Jika anggota (termasuk admin/pengurus) belum memilih seksi suara vokal spesifik
+      const hasSpecificVoiceSection = member?.seksi && !['umum', 'pengurus'].includes(member.seksi.toLowerCase());
+      if (!hasSpecificVoiceSection && (!existingAttendance || existingAttendance.status !== 'RESPONDED')) {
         session.step = 'WAITING_SECTION_REGISTRATION';
         session.data.nama = knownName || 'Saudara/i';
         session.data.namaAcara = currentEvent.namaAcara;
