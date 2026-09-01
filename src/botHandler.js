@@ -505,16 +505,20 @@ export async function handleIncomingMessage(sock, m) {
     // event / /event
     if (cleanText === '/event' || cleanText === 'event') {
       const ev = eventManager.getEvent();
+      const statusBadge = ev.isClosed
+        ? '🔒 *DITUTUP (Persiapan Latihan)*'
+        : '🟢 *SEDANG BERJALAN & DIBUKA*';
+
       const eventMsg =
-        `📌 *INFO ACARA LATIHAN SAAT INI*\n\n` +
+        `📌 *INFO ACARA LATIHAN TERDEKAT*\n\n` +
+        `• *Status:* ${statusBadge}\n` +
         `• *Acara:* ${ev.namaAcara}\n` +
         `• *Waktu:* ${ev.waktuLatihan}\n` +
         `• *Lokasi:* ${ev.lokasi}\n` +
         `• *Tujuan:* ${ev.tujuan}\n` +
         `• *Target On-Time:* ${ev.targetOnTime}\n` +
-        `• *Batas Pengisian:* ${ev.batasWaktu || 'Pukul 18:00 WIB'}\n` +
-        `• *Status Pendaftaran:* ${ev.isClosed ? '🔴 DITUTUP' : '🟢 DIBUKA'}\n\n` +
-        `_Ketik *setevent* untuk mengubah info di atas._`;
+        `• *Batas Pengisian:* ${ev.batasWaktu || 'Pukul 19:00 WIB'}\n\n` +
+        `💡 _Ketik *setevent* untuk membuat / mengubah jadwal latihan baru._`;
       await sendMessage(sock, remoteJid, eventMsg);
       return;
     }

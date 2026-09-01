@@ -439,29 +439,38 @@ export const messageTemplates = {
   },
 
   /**
-   * Template daftar riwayat acara lampau
+   * Template daftar riwayat acara lampau (Dikelompokkan Aktif vs Arsip)
    */
   getHistoryListMessage(eventsWithSummary) {
     if (!eventsWithSummary || eventsWithSummary.length === 0) {
       return `📜 *RIWAYAT ACARA*\n\nBelum ada riwayat acara yang tercatat di database.`;
     }
 
-    let msg = `📜 *RIWAYAT ACARA & KEHADIRAN LAMPAS (${eventsWithSummary.length} Acara Terakhir):*\n\n`;
+    const activeEvents = eventsWithSummary.filter((e) => e.isActive);
+    const pastEvents = eventsWithSummary.filter((e) => !e.isActive);
 
-    eventsWithSummary.forEach((item, idx) => {
-      let badge = '';
-      if (item.isActive) {
-        badge = item.isClosed ? ' 🔒 *(Ditutup / Selesai)*' : ' 🟢 *(Sedang Aktif)*';
-      } else {
-        badge = ' ⚪ *(Arsip Lampau)*';
-      }
+    let msg = `📜 *RIWAYAT ACARA & ARSIP LATIHAN*\n\n`;
 
-      msg += `*${idx + 1}.* [ID #${item.id}] *${item.namaAcara}*${badge}\n`;
-      msg += `   🗓️ ${item.waktuLatihan}\n`;
-      msg += `   📊 Hadir: *${item.totalHadir}* | Tidak Hadir: *${item.totalTidakHadir}* | Total Respon: *${item.overallTotalResponded}*\n\n`;
-    });
+    if (activeEvents.length > 0) {
+      msg += `🟢 *SEDANG BERJALAN / AKTIF (Latihan Minggu Ini):*\n`;
+      activeEvents.forEach((item) => {
+        const lockBadge = item.isClosed ? ' 🔒 *(Absensi Ditutup)*' : ' 🔓 *(Absensi Dibuka)*';
+        msg += `• [ID #${item.id}] *${item.namaAcara}*${lockBadge}\n`;
+        msg += `   🗓️ ${item.waktuLatihan}\n`;
+        msg += `   📊 Hadir: *${item.totalHadir}* | Tidak Hadir: *${item.totalTidakHadir}* | Total Respon: *${item.overallTotalResponded}*\n\n`;
+      });
+    }
 
-    msg += `💡 _Ketik *riwayat [ID]* (contoh: *riwayat 1*) untuk melihat rekap detail acara tertentu._`;
+    if (pastEvents.length > 0) {
+      msg += `📦 *ARSIP ACARA LAMPAU (Sudah Selesai):*\n`;
+      pastEvents.forEach((item) => {
+        msg += `• [ID #${item.id}] *${item.namaAcara}* ⚪\n`;
+        msg += `   🗓️ ${item.waktuLatihan}\n`;
+        msg += `   📊 Hadir: *${item.totalHadir}* | Tidak Hadir: *${item.totalTidakHadir}* | Total Respon: *${item.overallTotalResponded}*\n\n`;
+      });
+    }
+
+    msg += `💡 _Ketik *riwayat [ID]* (contoh: *riwayat 2*) untuk melihat detail absensi latihan tertentu._`;
     return msg;
   }
 };
