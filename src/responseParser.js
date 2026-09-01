@@ -80,11 +80,30 @@ export function parseSectionChoice(rawText) {
   if (!rawText) return 'UNKNOWN';
   const text = rawText.toLowerCase().trim();
 
+  // Sopran 1 & 2
+  if (text === '1a' || text.includes('sopran 1') || text.includes('soprano 1') || text.includes('s1')) return 'Sopran 1';
+  if (text === '1b' || text.includes('sopran 2') || text.includes('soprano 2') || text.includes('s2')) return 'Sopran 2';
   if (text === '1' || text.includes('sopran') || text.includes('soprano')) return 'Sopran';
+
+  // Alto 1 & 2
+  if (text === '2a' || text.includes('alto 1') || text.includes('a1')) return 'Alto 1';
+  if (text === '2b' || text.includes('alto 2') || text.includes('a2')) return 'Alto 2';
   if (text === '2' || text.includes('alto')) return 'Alto';
+
+  // Tenor 1 & 2
+  if (text === '3a' || text.includes('tenor 1') || text.includes('t1')) return 'Tenor 1';
+  if (text === '3b' || text.includes('tenor 2') || text.includes('t2')) return 'Tenor 2';
   if (text === '3' || text.includes('tenor')) return 'Tenor';
+
+  // Bass 1 & 2
+  if (text === '4a' || text.includes('bass 1') || text.includes('bas 1') || text.includes('b1')) return 'Bass 1';
+  if (text === '4b' || text.includes('bass 2') || text.includes('bas 2') || text.includes('b2')) return 'Bass 2';
   if (text === '4' || text.includes('bass') || text.includes('bas')) return 'Bass';
-  if (text === '5' || text.includes('musik') || text.includes('pemusik') || text.includes('musisi')) return 'Pemusik';
+
+  // Pemusik
+  if (text === '5' || text.includes('musik') || text.includes('pemusik') || text.includes('musisi') || text.includes('keyboard') || text.includes('gitar') || text.includes('drum')) return 'Pemusik';
+
+  // Umum
   if (text === '6' || text.includes('umum') || text.includes('jemaat') || text.includes('belum')) return 'Umum';
 
   return 'UNKNOWN';

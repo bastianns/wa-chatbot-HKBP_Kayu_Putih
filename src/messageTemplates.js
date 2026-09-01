@@ -71,19 +71,25 @@ export const messageTemplates = {
   },
 
   /**
-   * Tanya pilihan seksi suara saat registrasi anggota baru
+   * Tanya pilihan seksi suara saat registrasi atau pembaruan suara
    */
-  getAskSectionMessage(name) {
+  getAskSectionMessage(name, currentSeksi = null) {
+    const prevInfo = (currentSeksi && currentSeksi !== 'Umum' && currentSeksi !== 'Pengurus') 
+      ? `📌 _(Seksi suara Kakak latihan sebelumnya tercatat: *${currentSeksi}*)_\n\n` 
+      : '';
+
     return (
-      `Senang berkenalan dengan Kak *${name}*! ✨\n\n` +
-      `Boleh tahu Kakak bertugas di bagian seksi suara / pelayanan apa ya? 🎶\n\n` +
-      `Silakan balas dengan angka atau kata:\n` +
-      `*1.* Sopran 🎼\n` +
-      `*2.* Alto 🎶\n` +
-      `*3.* Tenor 🎤\n` +
-      `*4.* Bass 🎵\n` +
-      `*5.* Pemusik / Tim Musik 🎹\n` +
-      `*6.* Umum / Jemaat`
+      `Halo Kak *${name}*! 🎶✨\n\n` +
+      prevInfo +
+      `Boleh konfirmasi seksi suara / pelayanan Kakak untuk latihan ini?\n\n` +
+      `*Pilihan Seksi Suara:*\n` +
+      `• *1.* Sopran (atau ketik *Sopran 1* / *Sopran 2*) 🎼\n` +
+      `• *2.* Alto (atau ketik *Alto 1* / *Alto 2*) 🎶\n` +
+      `• *3.* Tenor (atau ketik *Tenor 1* / *Tenor 2*) 🎤\n` +
+      `• *4.* Bass (atau ketik *Bass 1* / *Bass 2*) 🎵\n` +
+      `• *5.* Pemusik / Tim Musik 🎹\n` +
+      `• *6.* Umum / Jemaat\n\n` +
+      `_(Silakan balas dengan angka atau kata, contoh: *1*, *Sopran 2*, atau *Alto*)_`
     );
   },
 

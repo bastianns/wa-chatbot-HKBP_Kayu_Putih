@@ -730,8 +730,28 @@ export async function handleIncomingMessage(sock, m) {
     if (param) {
       const choice = parseSectionChoice(param);
       if (choice !== 'UNKNOWN') {
+        const now = new Date().toISOString();
         memberManager.registerOrUpdate(effectivePhone, knownName || 'Anggota', choice);
-        await sendMessage(sock, remoteJid, `✅ Seksi suara Anda berhasil diatur ke: *${choice}*! 🎶`);
+        
+        attendanceTracker.db.prepare('UPDATE attendance_records SET seksi = ?, updated_at = ? WHERE event_id = ? AND phone = ?')
+          .run(choice, now, currentEvent.id, effectivePhone);
+
+        const existingAttendance = attendanceTracker.getAttendance(effectivePhone, currentEvent.id);
+        if (existingAttendance && existingAttendance.status === 'RESPONDED') {
+          await sendToGoogleSheets({
+            ...existingAttendance,
+            nama: knownName || member?.name || 'Anggota',
+            seksi: choice,
+            status: existingAttendance.attendance_choice || 'Bisa',
+            keterangan: existingAttendance.keterangan || '-',
+            alasan: existingAttendance.alasan || '-',
+            namaAcara: currentEvent.namaAcara,
+            tanggalLatihan: currentEvent.waktuLatihan,
+            nomorWa: effectivePhone
+          });
+        }
+
+        await sendMessage(sock, remoteJid, `✅ Seksi suara Anda berhasil diatur ke: *${choice}* dan disinkronkan ke rekap! 🎶`);
         return;
       }
     }
@@ -742,7 +762,7 @@ export async function handleIncomingMessage(sock, m) {
     session.data.tanggalLatihan = currentEvent.waktuLatihan;
     stateManager.updateSession(sessionKey, session);
 
-    const askMsg = messageTemplates.getAskSectionMessage(knownName || 'Saudara/i');
+    const askMsg = messageTemplates.getAskSectionMessage(knownName || 'Saudara/i', member?.seksi);
     await sendMessage(sock, remoteJid, askMsg);
     return;
   }
@@ -772,7 +792,7 @@ export async function handleIncomingMessage(sock, m) {
           session.step = 'WAITING_SECTION_REGISTRATION';
           stateManager.updateSession(sessionKey, session);
 
-          const askSectionDirectMsg = messageTemplates.getAskSectionMessage(inputName);
+          const askSectionDirectMsg = messageTemplates.getAskSectionMessage(inputName, member?.seksi);
           await sendMessage(sock, remoteJid, askSectionDirectMsg);
           return;
         }
@@ -802,7 +822,7 @@ export async function handleIncomingMessage(sock, m) {
         session.data.tanggalLatihan = currentEvent.waktuLatihan;
         stateManager.updateSession(sessionKey, session);
 
-        const askSectionMsg = messageTemplates.getAskSectionMessage(knownName || 'Saudara/i');
+        const askSectionMsg = messageTemplates.getAskSectionMessage(knownName || 'Saudara/i', member?.seksi);
         await sendMessage(sock, remoteJid, askSectionMsg);
         return;
       }
@@ -833,7 +853,7 @@ export async function handleIncomingMessage(sock, m) {
       session.step = 'WAITING_SECTION_REGISTRATION';
       stateManager.updateSession(sessionKey, session);
 
-      const askSectionMsg = messageTemplates.getAskSectionMessage(inputName);
+      const askSectionMsg = messageTemplates.getAskSectionMessage(inputName, member?.seksi);
       await sendMessage(sock, remoteJid, askSectionMsg);
       break;
     }
@@ -845,18 +865,47 @@ export async function handleIncomingMessage(sock, m) {
           sock,
           remoteJid,
           `Mohon pilih seksi suara Anda dengan angka atau kata:\n` +
-          `*1.* Sopran 🎼\n` +
-          `*2.* Alto 🎶\n` +
-          `*3.* Tenor 🎤\n` +
-          `*4.* Bass 🎵\n` +
-          `*5.* Pemusik 🎹\n` +
-          `*6.* Umum / Jemaat`
+          `• *1.* Sopran (Sopran 1 / Sopran 2) 🎼\n` +
+          `• *2.* Alto (Alto 1 / Alto 2) 🎶\n` +
+          `• *3.* Tenor (Tenor 1 / Tenor 2) 🎤\n` +
+          `• *4.* Bass (Bass 1 / Bass 2) 🎵\n` +
+          `• *5.* Pemusik 🎹\n` +
+          `• *6.* Umum / Jemaat`
         );
         return;
       }
 
-      memberManager.registerOrUpdate(effectivePhone, session.data.nama, sectionChoice, 'NHKBP Kayu Putih');
+      const now = new Date().toISOString();
+      memberManager.registerOrUpdate(effectivePhone, session.data.nama || knownName || member?.name || 'Anggota', sectionChoice, 'NHKBP Kayu Putih');
       session.data.seksi = sectionChoice;
+
+      attendanceTracker.db.prepare('UPDATE attendance_records SET seksi = ?, updated_at = ? WHERE event_id = ? AND phone = ?')
+        .run(sectionChoice, now, currentEvent.id, effectivePhone);
+
+      const existingAttendance = attendanceTracker.getAttendance(effectivePhone, currentEvent.id);
+      if (existingAttendance && existingAttendance.status === 'RESPONDED') {
+        stateManager.clearSession(sessionKey);
+        await sendToGoogleSheets({
+          ...existingAttendance,
+          nama: session.data.nama || knownName || member?.name || 'Anggota',
+          seksi: sectionChoice,
+          status: existingAttendance.attendance_choice || 'Bisa',
+          keterangan: existingAttendance.keterangan || '-',
+          alasan: existingAttendance.alasan || '-',
+          namaAcara: currentEvent.namaAcara,
+          tanggalLatihan: currentEvent.waktuLatihan,
+          nomorWa: effectivePhone
+        });
+
+        await sendMessage(
+          sock,
+          remoteJid,
+          `✅ Seksi suara Kak *${session.data.nama || knownName || 'Anggota'}* berhasil diperbarui ke: *${sectionChoice}*! 🎶✨\n` +
+          `Data di rekap Google Sheets telah disinkronkan.`
+        );
+        return;
+      }
+
       session.step = 'WAITING_ATTENDANCE';
       stateManager.updateSession(sessionKey, session);
 
