@@ -219,9 +219,10 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
   await t.test('14. Perintah Profil Diri (profil / saya)', async () => {
     stateManager.clearSession(memberJid);
     const prof = await sendMsg(memberJid, 'profil');
-    assert.strictEqual(prof.includes('PROFIL & DATA DIRI ANDA'), true);
+    assert.strictEqual(prof.includes('PROFIL & STATUS LATIHAN'), true);
     assert.strictEqual(prof.includes('Samuel Pasaribu'), true);
     assert.strictEqual(prof.includes('Status Kehadiran'), true);
+    assert.strictEqual(prof.includes('Nomor WhatsApp'), false);
   });
 
   await t.test('15. Perintah Ubah Nama Mandiri (#nama)', async () => {

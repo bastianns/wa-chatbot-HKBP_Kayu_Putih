@@ -64,10 +64,10 @@ export const messageTemplates = {
   },
 
   /**
-   * Tampilan Profil Mandiri Anggota (Info Lengkap & Jelas)
+   * Tampilan Profil Mandiri Anggota (Info Lengkap & Jelas, Bebas Clutter)
    */
   getMemberProfileMessage(name, phone, seksi, isAdmin, event, record) {
-    const roleBadge = isAdmin ? '⭐ *Pengurus / Admin*' : '👤 *Anggota Naposobulung*';
+    const adminTag = isAdmin ? ' _(Admin ⭐)_' : '';
     const voiceSection = (seksi && seksi !== 'Umum' && seksi !== 'Pengurus') ? `*${seksi}*` : '_Belum ditentukan (Ketik #suara)_';
 
     let statusText = '⚪ _Belum mengisi konfirmasi_';
@@ -82,13 +82,11 @@ export const messageTemplates = {
     }
 
     return (
-      `👤 *PROFIL & DATA DIRI ANDA*\n` +
+      `👤 *PROFIL & STATUS LATIHAN*\n` +
       `🏛️ *NHKBP Kayu Putih*\n` +
       `------------------------------------\n` +
-      `• *Nama Lengkap:* ${name || '(Belum terdaftar)'}\n` +
-      `• *Nomor WhatsApp:* ${phone || '-'}\n` +
-      `• *Seksi Suara:* ${voiceSection}\n` +
-      `• *Peran:* ${roleBadge}\n\n` +
+      `• *Nama Lengkap:* ${name || '(Belum terdaftar)'}${adminTag}\n` +
+      `• *Seksi Suara:* ${voiceSection}\n\n` +
       `*📅 Status Latihan Terdekat:*\n` +
       `• *Acara:* ${event ? event.namaAcara : 'Latihan Koor'}\n` +
       `• *Jadwal:* ${event ? event.waktuLatihan : '-'}\n` +
