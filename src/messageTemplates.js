@@ -5,36 +5,125 @@
 
 export const messageTemplates = {
   /**
-   * Menu Perintah Admin dengan jumlah anggota dinamis dari database
+   * Menu Perintah untuk Admin/Pengurus
    */
-  getHelpMessage(counts = {}, adminName = 'Pengurus') {
+  getAdminHelpMessage(counts = {}, adminName = 'Pengurus') {
     const targetCount = counts.targetKoor || 0;
     const allCount = counts.totalMembers || 0;
     const greeting = adminName ? `Shalom Kak *${adminName}*! 👋\n` : '';
 
     return (
       `${greeting}🛠️ *MENU PERINTAH ADMIN (SEKSI ROHANI & MUSIK)*\n\n` +
-      `*🚀 Perintah Broadcast Langsung dari WA:*\n` +
+      `*👤 Pribadi & Profil Anda:*\n` +
+      `• *profil* (atau *saya*) - Lihat data diri & status kehadiran Anda\n` +
+      `• *absen* (atau *#absen*) - Isi absensi untuk diri sendiri\n` +
+      `• *#suara* / *#nama* - Atur seksi suara vokal / nama Anda\n\n` +
+      `*🚀 Broadcast & Pengumuman:*\n` +
       `• *broadcast target* - Kirim PC ke ${targetCount} orang target khusus\n` +
       `• *broadcast pengurus* - Tes kirim PC ke sesama admin\n` +
       `• *broadcast all* - Kirim PC ke seluruh ${allCount} anggota\n` +
-      `• *remind* - Kirim pengingat ke yang belum membalas\n\n` +
-      `*📅 Pengaturan Acara:*\n` +
-      `• *event* - Lihat detail acara aktif\n` +
-      `• *setevent [Nama] | [Waktu] | [Lokasi] | [Tujuan]* - Ubah info acara\n` +
-      `• *preview* - Lihat simulasi pesan yang akan dikirim ke anggota\n` +
-      `• *tutup* - Tutup pengisian absensi (Cut-off)\n` +
-      `• *buka* - Buka kembali absensi\n` +
-      `• *umumkan* - Buat teks broadcast grup\n` +
-      `• *riwayat* - Lihat riwayat acara & kehadiran lampau\n\n` +
-      `*👥 Pengaturan Anggota & Grup:*\n` +
-      `• *gruplist* - Lihat semua grup WA yang diikuti bot\n` +
-      `• *syncgroup [No]* - Impor nomor anggota dari grup\n` +
-      `• *anggota* - Lihat daftar nama & seksi anggota (bisa: *anggota Sopran*, *anggota Tenor*, dsb.)\n` +
-      `• *cari [Nama/No]* - Cari info anggota & status kehadirannya\n\n` +
-      `*📊 Laporan & Monitoring:*\n` +
-      `• *rekap* - Lihat rekap kehadiran real-time\n` +
-      `• *pending* - Lihat anggota yang BELUM membalas`
+      `• *remind* - Kirim pengingat ke yang belum membalas\n` +
+      `• *umumkan* - Format teks pengumuman siap share ke grup WA\n\n` +
+      `*📅 Pengaturan Acara Latihan:*\n` +
+      `• *event* - Lihat info jadwal latihan aktif\n` +
+      `• *setevent [Nama] | [Waktu] | [Lokasi] | [Tujuan]* - Buat / ubah jadwal latihan\n` +
+      `• *tutup* / *buka* - Kunci / buka kembali pengisian absensi\n` +
+      `• *riwayat* - Lihat riwayat acara latihan lampau\n\n` +
+      `*📊 Monitoring & Data Anggota:*\n` +
+      `• *rekap* - Lihat rekapitulasi kehadiran real-time\n` +
+      `• *pending* - Lihat daftar nomor yang belum membalas\n` +
+      `• *anggota* - Lihat daftar anggota terdaftar (bisa: *anggota Sopran*, *anggota Tenor*)\n` +
+      `• *cari [Nama/No]* - Cari info anggota tertentu\n` +
+      `• *gruplist* / *syncgroup [No]* - Impor anggota dari grup WA`
+    );
+  },
+
+  /**
+   * Menu Bantuan Sederhana & Ramah untuk Anggota Biasa
+   */
+  getMemberHelpMessage(name = 'Saudara/i') {
+    return (
+      `Shalom Kak *${name}*! 👋✨\n` +
+      `Selamat datang di Bot Absensi Paduan Suara NHKBP Kayu Putih.\n\n` +
+      `*📌 PANDUAN PERINTAH YANG BISA KAKAK GUNAKAN:*\n\n` +
+      `• *profil* (atau *saya*) - Lihat data diri & status kehadiran Kakak\n` +
+      `• *absen* (atau *#absen*) - Isi konfirmasi kehadiran latihan aktif\n` +
+      `• *#ubah* - Ubah konfirmasi kehadiran jika rencana berubah\n` +
+      `• *#suara* - Atur/ganti seksi suara vokal (Sopran, Alto, Tenor, Bass, Pemusik)\n` +
+      `• *#nama [Nama Baru]* - Perbarui nama lengkap Anda\n` +
+      `• *event* - Lihat jadwal & info latihan aktif saat ini\n\n` +
+      `💡 _Contoh cara ubah suara cepat:_ Ketik *#suara Tenor 1* atau *#suara Sopran 2*`
+    );
+  },
+
+  /**
+   * Backward compatibility alias untuk help
+   */
+  getHelpMessage(counts = {}, adminName = 'Pengurus') {
+    return this.getAdminHelpMessage(counts, adminName);
+  },
+
+  /**
+   * Tampilan Profil Mandiri Anggota (Info Lengkap & Jelas)
+   */
+  getMemberProfileMessage(name, phone, seksi, isAdmin, event, record) {
+    const roleBadge = isAdmin ? '⭐ *Pengurus / Admin*' : '👤 *Anggota Naposobulung*';
+    const voiceSection = (seksi && seksi !== 'Umum' && seksi !== 'Pengurus') ? `*${seksi}*` : '_Belum ditentukan (Ketik #suara)_';
+
+    let statusText = '⚪ _Belum mengisi konfirmasi_';
+    if (record) {
+      if (record.attendance_choice === 'Bisa' || (record.status === 'RESPONDED' && record.attendance_choice === 'Bisa')) {
+        statusText = `✅ *Bisa Hadir* (${record.keterangan || 'On-Time'})`;
+      } else if (record.attendance_choice === 'Tidak Bisa' || (record.status === 'RESPONDED' && record.attendance_choice === 'Tidak Bisa')) {
+        statusText = `❌ *Tidak Bisa Hadir* (Alasan: ${record.alasan || '-'})`;
+      } else {
+        statusText = `⏳ *Sedang Proses:* ${record.status}`;
+      }
+    }
+
+    return (
+      `👤 *PROFIL & DATA DIRI ANDA*\n` +
+      `🏛️ *NHKBP Kayu Putih*\n` +
+      `------------------------------------\n` +
+      `• *Nama Lengkap:* ${name || '(Belum terdaftar)'}\n` +
+      `• *Nomor WhatsApp:* ${phone || '-'}\n` +
+      `• *Seksi Suara:* ${voiceSection}\n` +
+      `• *Peran:* ${roleBadge}\n\n` +
+      `*📅 Status Latihan Terdekat:*\n` +
+      `• *Acara:* ${event ? event.namaAcara : 'Latihan Koor'}\n` +
+      `• *Jadwal:* ${event ? event.waktuLatihan : '-'}\n` +
+      `• *Status Kehadiran:* ${statusText}\n` +
+      `------------------------------------\n\n` +
+      `*✏️ Ingin Mengubah Data Anda?*\n` +
+      `• Ketik *#suara* (atau *#suara Tenor 1*, *#suara Alto*) untuk ganti seksi suara\n` +
+      `• Ketik *#nama [Nama Baru]* untuk mengganti nama lengkap\n` +
+      `• Ketik *#absen* (atau *#ubah*) untuk mengisi / mengubah kehadiran`
+    );
+  },
+
+  /**
+   * Sapaan santai saat anggota mengirim salam (Halo / Pagi / dll.)
+   */
+  getCasualGreetingMessage(name, event, record, seksi, isAdmin) {
+    let statusSummary = '';
+    if (record && record.status === 'RESPONDED') {
+      const isHadir = record.attendance_choice === 'Bisa';
+      statusSummary = isHadir 
+        ? `✅ *Bisa Hadir* (${record.keterangan || 'On-Time'})` 
+        : `❌ *Tidak Bisa* (Alasan: ${record.alasan || '-'})`;
+    } else {
+      statusSummary = `⚪ _Belum mengisi kehadiran (Ketik *absen* untuk mengisi)_`;
+    }
+
+    const voiceInfo = (seksi && seksi !== 'Umum' && seksi !== 'Pengurus') ? ` | Seksi: *${seksi}*` : '';
+
+    return (
+      `Shalom Kak *${name}*! 👋✨\n\n` +
+      `📌 *Latihan Terdekat:* ${event.namaAcara}\n` +
+      `🗓️ *Waktu:* ${event.waktuLatihan}\n` +
+      `📍 *Lokasi:* ${event.lokasi}\n` +
+      `📊 *Status Kakak:* ${statusSummary}${voiceInfo}\n\n` +
+      `💡 _Ketik *profil* untuk lihat data diri, *absen* untuk isi kehadiran, atau *menu* untuk panduan lengkap._`
     );
   },
 

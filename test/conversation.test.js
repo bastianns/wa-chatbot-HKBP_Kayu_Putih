@@ -194,11 +194,43 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
     assert.strictEqual(r.includes('Mohon masukkan nama lengkap Anda yang jelas'), true);
   });
 
-  await t.test('12. Anggota yang sudah konfirmasi tidak ditanya ulang saat chat halo lagi', async () => {
+  await t.test('12. Sapaan santai saat anggota kirim salam (casual greeting)', async () => {
     stateManager.clearSession(memberJid);
     const r = await sendMsg(memberJid, 'Halo bot');
-    assert.strictEqual(r.includes('sudah tercatat mengonfirmasi kehadiran'), true);
-    assert.strictEqual(r.includes('#ubah'), true);
+    assert.strictEqual(r.includes('Status Kakak'), true);
+    assert.strictEqual(r.includes('profil'), true);
+  });
+
+  await t.test('13. Perbedaan Menu Help Anggota vs Admin', async () => {
+    stateManager.clearSession(memberJid);
+    stateManager.clearSession(adminJid);
+
+    // Help untuk anggota
+    const memberHelp = await sendMsg(memberJid, 'menu');
+    assert.strictEqual(memberHelp.includes('PANDUAN PERINTAH YANG BISA KAKAK GUNAKAN'), true);
+    assert.strictEqual(memberHelp.includes('broadcast target'), false);
+
+    // Help untuk admin
+    const adminHelp = await sendMsg(adminJid, 'menu');
+    assert.strictEqual(adminHelp.includes('MENU PERINTAH ADMIN'), true);
+    assert.strictEqual(adminHelp.includes('broadcast target'), true);
+  });
+
+  await t.test('14. Perintah Profil Diri (profil / saya)', async () => {
+    stateManager.clearSession(memberJid);
+    const prof = await sendMsg(memberJid, 'profil');
+    assert.strictEqual(prof.includes('PROFIL & DATA DIRI ANDA'), true);
+    assert.strictEqual(prof.includes('Samuel Pasaribu'), true);
+    assert.strictEqual(prof.includes('Status Kehadiran'), true);
+  });
+
+  await t.test('15. Perintah Ubah Nama Mandiri (#nama)', async () => {
+    stateManager.clearSession(memberJid);
+    const r = await sendMsg(memberJid, '#nama Samuel Panjaitan');
+    assert.strictEqual(r.includes('berhasil diperbarui menjadi: *Samuel Panjaitan*'), true);
+
+    const m = memberManager.findMember(memberPhone);
+    assert.strictEqual(m.name, 'Samuel Panjaitan');
   });
 
   // Bersihkan kembali setelah selesai

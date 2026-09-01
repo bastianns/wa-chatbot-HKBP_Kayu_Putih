@@ -290,19 +290,56 @@ export async function handleIncomingMessage(sock, m) {
   const cleanText = rawText.toLowerCase().trim();
   logger.info('INBOUND', `Dari: ${senderPhone} (${remoteJid}) | Admin: ${userIsAdmin ? 'YA' : 'TIDAK'} | Pesan: "${rawText}"`);
 
+  // Resolusi Identitas
+  let member = memberManager.findMember(senderPhone);
+  let knownName = (member && isValidName(member.name)) ? member.name.trim() : (isValidName(msg.pushName) ? msg.pushName.trim() : '');
+  let seksi = member ? member.seksi : (userIsAdmin ? 'Pengurus' : 'Umum');
+  let effectivePhone = member?.phone || senderPhone;
+
+  const sessionKey = `${senderPhone}@s.whatsapp.net`;
+  const session = stateManager.getSession(sessionKey, knownName || 'Saudara/i');
+  session.data.seksi = seksi;
+  session.data.nomorWa = effectivePhone;
+
   // =========================================================================
-  // 1. ADMIN COMMANDS
+  // 1. GLOBAL COMMANDS (ADMIN & ANGGOTA)
   // =========================================================================
-  if (userIsAdmin) {
-    // help / /help / admin / /admin / menu
-    if (cleanText === '/help' || cleanText === 'help' || cleanText === '/admin' || cleanText === 'admin' || cleanText === 'menu') {
+
+  // Command Menu / Help / Bantuan
+  if (cleanText === '/help' || cleanText === 'help' || cleanText === '/admin' || cleanText === 'admin' || cleanText === '/menu' || cleanText === 'menu' || cleanText === 'bantuan') {
+    if (userIsAdmin) {
       const adminMember = memberManager.findMember(senderPhone);
       const adminName = adminMember?.name ? adminMember.name.split(' ')[0] : 'Pengurus';
       const counts = memberManager.getCounts();
-      const helpMsg = messageTemplates.getHelpMessage(counts, adminName);
+      const helpMsg = messageTemplates.getAdminHelpMessage(counts, adminName);
       await sendMessage(sock, remoteJid, helpMsg);
-      return;
+    } else {
+      const helpMsg = messageTemplates.getMemberHelpMessage(knownName || 'Saudara/i');
+      await sendMessage(sock, remoteJid, helpMsg);
     }
+    return;
+  }
+
+  // Command Profil Saya / Status
+  if (cleanText === '/profil' || cleanText === 'profil' || cleanText === 'saya' || cleanText === '/saya' || cleanText === 'info' || cleanText === 'status' || cleanText === '/status') {
+    const currentEvent = eventManager.getEvent();
+    const att = attendanceTracker.getAttendance(effectivePhone, currentEvent?.id);
+    const profileMsg = messageTemplates.getMemberProfileMessage(
+      knownName || member?.name,
+      effectivePhone,
+      member?.seksi,
+      userIsAdmin,
+      currentEvent,
+      att
+    );
+    await sendMessage(sock, remoteJid, profileMsg);
+    return;
+  }
+
+  // =========================================================================
+  // 2. ADMIN-ONLY COMMANDS
+  // =========================================================================
+  if (userIsAdmin) {
 
     // broadcast [tag]
     if (cleanText.startsWith('/broadcast') || cleanText.startsWith('broadcast')) {
@@ -647,17 +684,6 @@ export async function handleIncomingMessage(sock, m) {
   // 3. ALUR PERCAKAPAN PERSONAL (PRIVATE CHAT)
   // =========================================================================
 
-  // Resolusi Identitas
-  let member = memberManager.findMember(senderPhone);
-  let knownName = (member && isValidName(member.name)) ? member.name.trim() : (isValidName(msg.pushName) ? msg.pushName.trim() : '');
-  let seksi = member ? member.seksi : (userIsAdmin ? 'Pengurus' : 'Umum');
-  let effectivePhone = member?.phone || senderPhone;
-
-  const sessionKey = `${senderPhone}@s.whatsapp.net`;
-  const session = stateManager.getSession(sessionKey, knownName || 'Saudara/i');
-  session.data.seksi = seksi;
-  session.data.nomorWa = effectivePhone;
-
   // Jika admin, pastikan tidak tersangkut di WAITING_NAME_REGISTRATION / WAITING_LID
   if (userIsAdmin && (session.step === 'WAITING_NAME_REGISTRATION' || session.step === 'WAITING_LID_PHONE_CONFIRMATION')) {
     session.step = 'IDLE';
@@ -704,8 +730,51 @@ export async function handleIncomingMessage(sock, m) {
     return;
   }
 
-  // Command #ubah / ubah / edit / ganti (Mengubah RSVP)
-  if (cleanText === '#ubah' || cleanText === 'ubah' || cleanText === 'edit' || cleanText === 'ganti') {
+  // Command #nama / nama (Mengubah Nama Lengkap)
+  if (cleanText.startsWith('#nama') || cleanText.startsWith('nama') || cleanText.startsWith('/nama')) {
+    const param = rawText.replace(/^[#/]?nama/i, '').trim();
+    if (param) {
+      const newName = cleanNameInput(param);
+      if (isValidName(newName)) {
+        const now = new Date().toISOString();
+        memberManager.registerOrUpdate(effectivePhone, newName, member?.seksi, 'NHKBP Kayu Putih');
+
+        attendanceTracker.db.prepare('UPDATE attendance_records SET name = ?, updated_at = ? WHERE event_id = ? AND phone = ?')
+          .run(newName, now, currentEvent.id, effectivePhone);
+
+        const existingAttendance = attendanceTracker.getAttendance(effectivePhone, currentEvent.id);
+        if (existingAttendance && existingAttendance.status === 'RESPONDED') {
+          await sendToGoogleSheets({
+            ...existingAttendance,
+            nama: newName,
+            seksi: member?.seksi || 'Umum',
+            status: existingAttendance.attendance_choice || 'Bisa',
+            keterangan: existingAttendance.keterangan || '-',
+            alasan: existingAttendance.alasan || '-',
+            namaAcara: currentEvent.namaAcara,
+            tanggalLatihan: currentEvent.waktuLatihan,
+            nomorWa: effectivePhone
+          });
+        }
+
+        await sendMessage(sock, remoteJid, `✅ Nama lengkap Anda berhasil diperbarui menjadi: *${newName}*! ✨\n\nData di rekap absensi telah disinkronkan.`);
+        return;
+      } else {
+        await sendMessage(sock, remoteJid, `Mohon masukkan nama lengkap Anda yang jelas yaa (minimal 2 kata). 🙏\n\nContoh: *#nama Bastian Sibarani*`);
+        return;
+      }
+    }
+
+    session.step = 'WAITING_NAME_UPDATE';
+    session.data.nama = knownName || 'Saudara/i';
+    stateManager.updateSession(sessionKey, session);
+
+    await sendMessage(sock, remoteJid, `Silakan ketik nama lengkap baru Anda (minimal 2 kata):\n\nContoh: *Bastian Sibarani*`);
+    return;
+  }
+
+  // Command #absen / absen / #ubah / ubah / edit / ganti (Mengisi atau Mengubah RSVP)
+  if (cleanText === '#absen' || cleanText === 'absen' || cleanText === '/absen' || cleanText === '#ubah' || cleanText === 'ubah' || cleanText === 'edit' || cleanText === 'ganti') {
     stateManager.clearSession(sessionKey);
     const reSession = stateManager.getSession(sessionKey, knownName || 'Saudara/i');
     reSession.step = 'WAITING_ATTENDANCE';
@@ -778,9 +847,44 @@ export async function handleIncomingMessage(sock, m) {
     return;
   }
 
-  const isGenericGreeting = ['halo', 'hallo', 'hello', 'hai', 'hi', 'p', 'tes', 'test', 'absen', 'shalom', 'salam', 'pagi', 'siang', 'sore', 'malam'].includes(cleanText);
+  const isGenericGreeting =
+    ['halo', 'hallo', 'hello', 'hai', 'hi', 'p', 'tes', 'test', 'absen', 'shalom', 'salam', 'pagi', 'siang', 'sore', 'malam'].includes(cleanText) ||
+    ['halo', 'hallo', 'hello', 'hai', 'hi', 'p', 'tes', 'test', 'absen', 'shalom', 'salam', 'pagi', 'siang', 'sore', 'malam'].includes(cleanText.replace(/\bbot\b/g, '').trim());
 
   switch (session.step) {
+    case 'WAITING_NAME_UPDATE': {
+      const inputName = cleanNameInput(rawText);
+      if (!isValidName(inputName) || isGenericGreeting) {
+        await sendMessage(sock, remoteJid, `Mohon masukkan nama lengkap Anda yang jelas yaa (minimal 2 kata). 🙏\n\nContoh: *Bastian Sibarani*`);
+        return;
+      }
+
+      const now = new Date().toISOString();
+      memberManager.registerOrUpdate(effectivePhone, inputName, member?.seksi, 'NHKBP Kayu Putih');
+      stateManager.clearSession(sessionKey);
+
+      attendanceTracker.db.prepare('UPDATE attendance_records SET name = ?, updated_at = ? WHERE event_id = ? AND phone = ?')
+        .run(inputName, now, currentEvent.id, effectivePhone);
+
+      const existingAttendance = attendanceTracker.getAttendance(effectivePhone, currentEvent.id);
+      if (existingAttendance && existingAttendance.status === 'RESPONDED') {
+        await sendToGoogleSheets({
+          ...existingAttendance,
+          nama: inputName,
+          seksi: member?.seksi || 'Umum',
+          status: existingAttendance.attendance_choice || 'Bisa',
+          keterangan: existingAttendance.keterangan || '-',
+          alasan: existingAttendance.alasan || '-',
+          namaAcara: currentEvent.namaAcara,
+          tanggalLatihan: currentEvent.waktuLatihan,
+          nomorWa: effectivePhone
+        });
+      }
+
+      await sendMessage(sock, remoteJid, `✅ Nama lengkap Anda berhasil diperbarui menjadi: *${inputName}*! ✨\n\nData di rekap absensi telah disinkronkan.`);
+      break;
+    }
+
     case 'IDLE': {
       const hasValidMemberName = member && isValidName(member.name);
       if (!userIsAdmin && !hasValidMemberName) {
@@ -805,29 +909,23 @@ export async function handleIncomingMessage(sock, m) {
         return;
       }
 
-      // Cek apakah anggota ini sudah pernah menyelesaikan konfirmasi absensi di event aktif saat ini
+      // Ambil data absensi saat ini
       const existingAttendance = attendanceTracker.getAttendance(effectivePhone, currentEvent.id);
-      if (existingAttendance && existingAttendance.status === 'RESPONDED') {
-        const adminHint = userIsAdmin ? `\n\n_(💡 Anda login sebagai Admin. Ketik *help* atau */help* untuk menu perintah admin)_` : '';
-        const alreadyMsg = messageTemplates.getAlreadyRespondedGreeting(knownName || 'Saudara/i', currentEvent, existingAttendance) + adminHint;
-        await sendMessage(sock, remoteJid, alreadyMsg);
+
+      // Jika anggota mengirim salam santai
+      if (isGenericGreeting) {
+        const casualGreeting = messageTemplates.getCasualGreetingMessage(
+          knownName || 'Saudara/i',
+          currentEvent,
+          existingAttendance,
+          member?.seksi,
+          userIsAdmin
+        );
+        await sendMessage(sock, remoteJid, casualGreeting);
         return;
       }
 
-      // Jika anggota (termasuk admin/pengurus) belum memilih seksi suara vokal spesifik
-      const hasSpecificVoiceSection = member?.seksi && !['umum', 'pengurus'].includes(member.seksi.toLowerCase());
-      if (!hasSpecificVoiceSection && (!existingAttendance || existingAttendance.status !== 'RESPONDED')) {
-        session.step = 'WAITING_SECTION_REGISTRATION';
-        session.data.nama = knownName || 'Saudara/i';
-        session.data.namaAcara = currentEvent.namaAcara;
-        session.data.tanggalLatihan = currentEvent.waktuLatihan;
-        stateManager.updateSession(sessionKey, session);
-
-        const askSectionMsg = messageTemplates.getAskSectionMessage(knownName || 'Saudara/i', member?.seksi);
-        await sendMessage(sock, remoteJid, askSectionMsg);
-        return;
-      }
-
+      // Jika mengirim teks lain saat IDLE, tampilkan salam atau panduan
       session.step = 'WAITING_ATTENDANCE';
       session.data.nama = knownName || 'Saudara/i';
       session.data.namaAcara = currentEvent.namaAcara;
