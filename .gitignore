@@ -1,0 +1,35 @@
+# Environment & Credentials
+.env
+.env.local
+.env.*.local
+auth_info_baileys/
+
+# SQLite & Data Storage
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+
+# Legacy Flat JSON Files & Backups (Sensitive Member Data)
+members.json
+sessions.json
+attendance_tracker.json
+event_config.json
+*.bak
+*.json.bak
+
+# Node & Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS & Temp
+.DS_Store
+Thumbs.db
+temp_test*

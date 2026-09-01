@@ -1,0 +1,30 @@
+{
+  "name": "wa-absensi-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Bot Interaktif untuk Absensi Latihan & Terintegrasi dengan Google Sheets (SQLite Edition)",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "broadcast": "node src/broadcast.js",
+    "remind": "node src/remind.js",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "google-sheets",
+    "absensi",
+    "bot",
+    "sqlite"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.14",
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
