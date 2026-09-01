@@ -883,6 +883,31 @@ export async function handleIncomingMessage(sock, m) {
     ['halo', 'hallo', 'hello', 'hai', 'hi', 'p', 'tes', 'test', 'absen', 'shalom', 'salam', 'pagi', 'siang', 'sore', 'malam'].includes(cleanText) ||
     ['halo', 'hallo', 'hello', 'hai', 'hi', 'p', 'tes', 'test', 'absen', 'shalom', 'salam', 'pagi', 'siang', 'sore', 'malam'].includes(cleanText.replace(/\bbot\b/g, '').trim());
 
+  // =========================================================================
+  // AI AGENT INTERCEPTOR: Memahami pertanyaan dan bahasa alami bebas di semua step
+  // =========================================================================
+  if (aiAgent.isAvailable() && !isGenericGreeting) {
+    const isSingleNumber = /^[1-6]$/.test(cleanText);
+    const isStrictYesNo = ['bisa', 'tidak', 'tidak bisa', 'hadir', 'absen', 'ya', 'gak', 'ngga', 'nggak'].includes(cleanText);
+    const shouldLetFsmHandle = (session.step !== 'IDLE') && (isSingleNumber || isStrictYesNo);
+
+    if (!shouldLetFsmHandle) {
+      const aiReply = await aiAgent.processMessage({
+        effectivePhone,
+        rawText,
+        member,
+        knownName,
+        userIsAdmin
+      });
+
+      if (aiReply) {
+        stateManager.clearSession(sessionKey);
+        await sendMessage(sock, remoteJid, aiReply);
+        return;
+      }
+    }
+  }
+
   switch (session.step) {
     case 'WAITING_NAME_UPDATE': {
       const inputName = cleanNameInput(rawText);
