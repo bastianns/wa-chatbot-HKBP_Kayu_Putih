@@ -263,6 +263,20 @@ export class AttendanceTracker {
   }
 
   /**
+   * Mengambil record absensi spesifik seorang anggota di event tertentu
+   */
+  getAttendance(phoneOrLid, eventId = null) {
+    const evId = eventId || this.getActiveEventId();
+    let cleanPhone = this.memberManager.normalizePhone(phoneOrLid);
+    const mappedPhone = this.memberManager.getLidMapping(cleanPhone);
+    if (mappedPhone) {
+      cleanPhone = mappedPhone;
+    }
+
+    return this.db.prepare('SELECT * FROM attendance_records WHERE event_id = ? AND phone = ?').get(evId, cleanPhone) || null;
+  }
+
+  /**
    * Mengambil semua record absensi untuk event tertentu
    */
   getEventAttendance(eventId = null) {

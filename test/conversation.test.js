@@ -194,6 +194,13 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
     assert.strictEqual(r.includes('Mohon masukkan nama lengkap Anda yang jelas'), true);
   });
 
+  await t.test('12. Anggota yang sudah konfirmasi tidak ditanya ulang saat chat halo lagi', async () => {
+    stateManager.clearSession(memberJid);
+    const r = await sendMsg(memberJid, 'Halo bot');
+    assert.strictEqual(r.includes('sudah tercatat mengonfirmasi kehadiran'), true);
+    assert.strictEqual(r.includes('#ubah'), true);
+  });
+
   // Bersihkan kembali setelah selesai
   db.prepare('DELETE FROM members WHERE phone IN (?, ?, ?)').run(adminPhone, memberPhone, strangerPhone);
   db.prepare('DELETE FROM sessions WHERE jid IN (?, ?, ?)').run(adminJid, memberJid, strangerJid);

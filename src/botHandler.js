@@ -774,6 +774,15 @@ export async function handleIncomingMessage(sock, m) {
         return;
       }
 
+      // Cek apakah anggota ini sudah pernah menyelesaikan konfirmasi absensi di event aktif saat ini
+      const existingAttendance = attendanceTracker.getAttendance(effectivePhone, currentEvent.id);
+      if (existingAttendance && existingAttendance.status === 'RESPONDED') {
+        const adminHint = userIsAdmin ? `\n\n_(💡 Anda login sebagai Admin. Ketik *help* atau */help* untuk menu perintah admin)_` : '';
+        const alreadyMsg = messageTemplates.getAlreadyRespondedGreeting(knownName || 'Saudara/i', currentEvent, existingAttendance) + adminHint;
+        await sendMessage(sock, remoteJid, alreadyMsg);
+        return;
+      }
+
       session.step = 'WAITING_ATTENDANCE';
       session.data.nama = knownName || 'Saudara/i';
       session.data.namaAcara = currentEvent.namaAcara;

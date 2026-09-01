@@ -159,6 +159,25 @@ export const messageTemplates = {
   },
 
   /**
+   * Sapaan untuk anggota yang sudah selesai mengonfirmasi kehadiran sebelumnya
+   */
+  getAlreadyRespondedGreeting(name, event, record) {
+    const isHadir = record.attendance_choice === 'Bisa' || (record.status === 'RESPONDED' && record.attendance_choice === 'Bisa');
+    const statusEmoji = isHadir ? '✅' : '❌';
+    const statusText = isHadir ? 'Bisa Hadir' : 'Tidak Bisa Hadir';
+    const detailText = isHadir ? (record.keterangan || 'On-Time') : `Alasan: ${record.alasan || '-'}`;
+
+    return (
+      `Shalom Kak *${name}*! 👋✨\n\n` +
+      `Kakak sebelumnya sudah tercatat mengonfirmasi kehadiran untuk *${event.namaAcara}*:\n` +
+      `🗓️ *Waktu:* ${event.waktuLatihan}\n` +
+      `📍 *Lokasi:* ${event.lokasi}\n` +
+      `📋 *Status:* ${statusEmoji} *${statusText}* (${detailText})\n\n` +
+      `💡 _Jika ada perubahan rencana mendadak, Kakak bisa ketik *#ubah* kapan saja untuk mengganti status kehadiran ya!_ 😊`
+    );
+  },
+
+  /**
    * Tanya konfirmasi jam On-Time / Telat
    */
   getAskOnTimeMessage(event) {
