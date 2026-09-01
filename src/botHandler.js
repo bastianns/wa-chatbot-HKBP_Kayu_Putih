@@ -554,6 +554,31 @@ export async function handleIncomingMessage(sock, m) {
       return;
     }
 
+    // cari / /cari [nama / nomor] / cek / /cek
+    if (cleanText.startsWith('/cari') || cleanText.startsWith('cari') || cleanText.startsWith('/cek') || cleanText.startsWith('cek')) {
+      const keyword = rawText.replace(/^\/?(cari|cek)/i, '').trim();
+      if (!keyword) {
+        await sendMessage(
+          sock,
+          remoteJid,
+          `⚠️ Mohon sertakan nama atau nomor HP yang ingin dicari.\n\n*Contoh:*\n• *cari Bastian*\n• *cari Ruth*\n• *cari 0812*`
+        );
+        return;
+      }
+
+      const results = memberManager.searchMembers(keyword);
+      const currentEvent = eventManager.getEvent();
+      const records = attendanceTracker.getEventAttendance(currentEvent.id);
+      const attendanceMap = {};
+      records.forEach((r) => {
+        attendanceMap[r.phone] = r;
+      });
+
+      const msg = messageTemplates.getMemberSearchResultMessage(keyword, results, attendanceMap);
+      await sendMessage(sock, remoteJid, msg);
+      return;
+    }
+
     // riwayat / /riwayat [ID]
     if (cleanText.startsWith('/riwayat') || cleanText.startsWith('riwayat')) {
       const param = cleanText.replace(/^\/?riwayat/i, '').trim();

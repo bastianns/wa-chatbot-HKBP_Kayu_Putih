@@ -35,4 +35,20 @@ test('isAdmin - Single Source of Truth & Exact Matching', async (t) => {
     assert.strictEqual(memberMgr.isAdmin('172743634981033@lid'), true);
     assert.strictEqual(memberMgr.isAdmin('999999999999999@lid'), false);
   });
+
+  await t.test('searchMembers - mencari anggota spesifik berdasarkan nama dan nomor', () => {
+    memberMgr.registerOrUpdate('6281512345678', 'Maria Hutapea', 'Sopran', 'NHKBP Kayu Putih', 0);
+
+    const resByName = memberMgr.searchMembers('Maria');
+    assert.strictEqual(resByName.length, 1);
+    assert.strictEqual(resByName[0].name, 'Maria Hutapea');
+    assert.strictEqual(resByName[0].seksi, 'Sopran');
+
+    const resByPhone = memberMgr.searchMembers('081512345678');
+    assert.strictEqual(resByPhone.length, 1);
+    assert.strictEqual(resByPhone[0].name, 'Maria Hutapea');
+
+    const resNotFound = memberMgr.searchMembers('OrangTidakAda');
+    assert.strictEqual(resNotFound.length, 0);
+  });
 });

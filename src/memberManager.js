@@ -191,6 +191,27 @@ export class MemberManager {
   }
 
   /**
+   * Cari anggota spesifik berdasarkan nama atau nomor HP
+   */
+  searchMembers(keyword, limit = 15) {
+    if (!keyword) return [];
+    const clean = keyword.trim().toLowerCase();
+    const cleanPhone = this.normalizePhone(keyword);
+
+    const query = `
+      SELECT * FROM members 
+      WHERE LOWER(name) LIKE ? OR phone LIKE ?
+      ORDER BY name ASC
+      LIMIT ?
+    `;
+
+    const searchName = `%${clean}%`;
+    const searchPhone = cleanPhone ? `%${cleanPhone}%` : `%${clean}%`;
+
+    return this.db.prepare(query).all(searchName, searchPhone, limit);
+  }
+
+  /**
    * Mengambil ringkasan jumlah anggota per tag/kategori untuk template dinamis
    */
   getCounts() {

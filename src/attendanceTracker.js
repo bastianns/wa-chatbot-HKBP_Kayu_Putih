@@ -261,6 +261,14 @@ export class AttendanceTracker {
       tidakHadirPendingAlasan: targetKoor.tidakHadirPendingAlasan
     };
   }
+
+  /**
+   * Mengambil semua record absensi untuk event tertentu
+   */
+  getEventAttendance(eventId = null) {
+    const evId = eventId || this.getActiveEventId();
+    return this.db.prepare('SELECT * FROM attendance_records WHERE event_id = ?').all(evId);
+  }
 }
 
 export const attendanceTracker = new AttendanceTracker();

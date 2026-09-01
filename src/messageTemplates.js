@@ -30,11 +30,44 @@ export const messageTemplates = {
       `*👥 Pengaturan Anggota & Grup:*\n` +
       `• *gruplist* - Lihat semua grup WA yang diikuti bot\n` +
       `• *syncgroup [No]* - Impor nomor anggota dari grup\n` +
-      `• *anggota* - Lihat daftar nama & seksi anggota (bisa: *anggota Sopran*, *anggota Tenor*, dsb.)\n\n` +
+      `• *anggota* - Lihat daftar nama & seksi anggota (bisa: *anggota Sopran*, *anggota Tenor*, dsb.)\n` +
+      `• *cari [Nama/No]* - Cari info anggota & status kehadirannya\n\n` +
       `*📊 Laporan & Monitoring:*\n` +
       `• *rekap* - Lihat rekap kehadiran real-time\n` +
       `• *pending* - Lihat anggota yang BELUM membalas`
     );
+  },
+
+  /**
+   * Hasil pencarian anggota spesifik
+   */
+  getMemberSearchResultMessage(keyword, results = [], attendanceMap = {}) {
+    if (!results || results.length === 0) {
+      return `🔍 *PENCARIAN ANGGOTA ("${keyword}")*\n\n❌ Tidak ditemukan anggota dengan nama atau nomor HP tersebut.`;
+    }
+
+    let msg = `🔍 *HASIL PENCARIAN ANGGOTA ("${keyword}") - Ditemukan ${results.length} orang:*\n\n`;
+
+    results.forEach((m, idx) => {
+      const att = attendanceMap[m.phone] || null;
+      let statusStr = '⚪ _Belum ada respon_';
+      if (att) {
+        if (att.status === 'Bisa') {
+          statusStr = `✅ *Bisa Hadir* (${att.keterangan || 'On-Time'})`;
+        } else if (att.status === 'Tidak Bisa') {
+          statusStr = `❌ *Tidak Bisa* (Alasan: ${att.alasan || '-'})`;
+        } else {
+          statusStr = `⏳ *Proses:* ${att.status}`;
+        }
+      }
+
+      msg += `*${idx + 1}.* 👤 *${m.name || '(Belum input nama)'}*\n`;
+      msg += `   📱 No WA: *${m.phone}*\n`;
+      msg += `   🎶 Seksi: *${m.seksi || 'Umum'}* | ${m.is_admin ? '⭐ *Admin*' : 'Anggota'}\n`;
+      msg += `   📊 Status Event: ${statusStr}\n\n`;
+    });
+
+    return msg.trim();
   },
 
   /**
