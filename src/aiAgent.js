@@ -256,13 +256,43 @@ export class AiAgent {
           name: knownName || member?.name || '(Belum terdaftar)',
           seksi: member?.seksi || 'Umum',
           peran: member?.peran || 'Anggota Naposobulung',
-          attendance: att ? { choice: att.attendance_choice, keterangan: att.keterangan, alasan: att.alasan } : null
+          event: currentEvent.namaAcara,
+          eventDate: currentEvent.waktuLatihan,
+          attendance: att
+            ? {
+                status: att.status,
+                choice: att.attendance_choice || 'Belum konfirmasi',
+                keterangan: att.keterangan || '-',
+                alasan: att.alasan || '-'
+              }
+            : {
+                status: 'NOT_RESPONDED',
+                choice: 'Belum mengisi konfirmasi',
+                keterangan: '-',
+                alasan: '-'
+              }
         };
       }
 
       default:
         return { success: false, message: `Tool ${toolName} tidak dikenal.` };
     }
+  }
+
+  /**
+   * Helper untuk mengekstrak string teks dari candidate parts Gemini
+   */
+  extractText(response) {
+    if (!response) return null;
+    if (typeof response.text === 'string' && response.text.trim().length > 0) {
+      return response.text.trim();
+    }
+    const parts = response.candidates?.[0]?.content?.parts;
+    if (Array.isArray(parts)) {
+      const text = parts.map((p) => p.text).filter(Boolean).join('\n').trim();
+      if (text.length > 0) return text;
+    }
+    return null;
   }
 
   /**
@@ -283,7 +313,7 @@ Tugas utama Anda:
 2. Membantu anggota mengonfirmasi kehadiran latihan paduan suara, mencatat jam estimasi jika terlambat, atau mencatat alasan jika berhalangan dengan memanggil tool "recordAttendance".
 3. Membantu anggota mengatur/mengubah seksi suara (Sopran 1/2, Alto 1/2, Tenor 1/2, Bass 1/2, Pemusik, Umum) dengan memanggil tool "updateVoiceSection".
 4. Membantu memperbarui nama lengkap ("updateMemberName") atau peran pelayanan ("updateMemberRole").
-5. Menjawab pertanyaan seputar jadwal latihan dan lokasi acara ("getEventSchedule") atau profil diri ("getMyProfile").
+5. Menjawab pertanyaan seputar jadwal latihan dan lokasi acara ("getEventSchedule") atau profil diri dan status kehadiran ("getMyProfile").
 
 Informasi Konteks Saat Ini:
 - Nama Pengirim: ${knownName || member?.name || 'Saudara/i'}
@@ -300,67 +330,83 @@ Informasi Konteks Saat Ini:
 Panduan Sikap & Formatting:
 - Gunakan bahasa Indonesia yang santun, bersahabat, dan jelas.
 - Format pesan WhatsApp dengan rapi menggunakan bold (*teks*), italic (_teks_), dan emoji secukupnya.
-- Jika pengguna sudah menyampaikan niatnya secara jelas (contoh: "bisa hadir jam 8", "pindah suara alto 2", "nama saya Samuel"), panggil tool yang sesuai terlebih dahulu, lalu berikan respon konfirmasi yang ramah.
+- Jika pengguna menanyakan status absensinya, panggil tool "getMyProfile" lalu laporkan statusnya secara ramah.
 - Hindari halusinasi data. Jangan mengarang jadwal acara atau status kehadiran tanpa mengecek tool atau konteks di atas.
 `.trim();
 
-    try {
-      logger.info('AI_AGENT', `Mengirim pesan ke Gemini AI: "${rawText}" dari ${effectivePhone}`);
+    const candidateModels = [
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-3.6-flash'
+    ];
 
-      const response = await this.client.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: rawText,
-        config: {
-          systemInstruction,
-          tools: this.getToolDeclarations()
-        }
-      });
+    logger.info('AI_AGENT', `Mengirim pesan ke Gemini AI: "${rawText}" dari ${effectivePhone}`);
 
-      // Cek apakah Gemini memanggil Function / Tool
-      const functionCalls = response.functionCalls ? response.functionCalls : [];
-
-      if (functionCalls.length > 0) {
-        const toolResponses = [];
-        for (const fc of functionCalls) {
-          const result = await this.executeTool(fc.name, fc.args || {}, context);
-          toolResponses.push({
-            name: fc.name,
-            response: result,
-            id: fc.id
-          });
-        }
-
-        // Kirim kembali hasil eksekusi tool ke Gemini untuk menghasilkan balasan percakapan final
-        const followUpResponse = await this.client.models.generateContent({
-          model: 'gemini-3.6-flash',
-          contents: [
-            { role: 'user', parts: [{ text: rawText }] },
-            response.candidates[0].content,
-            {
-              role: 'user',
-              parts: toolResponses.map((tr) => ({
-                functionResponse: {
-                  name: tr.name,
-                  response: tr.response,
-                  ...(tr.id ? { id: tr.id } : {})
-                }
-              }))
-            }
-          ],
+    for (const modelName of candidateModels) {
+      try {
+        const response = await this.client.models.generateContent({
+          model: modelName,
+          contents: rawText,
           config: {
-            systemInstruction
+            systemInstruction,
+            tools: this.getToolDeclarations()
           }
         });
 
-        return followUpResponse.text || null;
-      }
+        // Cek apakah Gemini memanggil Function / Tool
+        const functionCalls = response.functionCalls ? response.functionCalls : [];
 
-      return response.text || null;
-    } catch (err) {
-      logger.error('AI_AGENT', `Error in Gemini AI Agent: ${err.message}`, err);
-      // Fallback null agar sistem melanjutkan ke FSM deterministik secara aman
-      return null;
+        if (functionCalls.length > 0) {
+          const toolResponses = [];
+          for (const fc of functionCalls) {
+            const result = await this.executeTool(fc.name, fc.args || {}, context);
+            toolResponses.push({
+              name: fc.name,
+              response: result,
+              id: fc.id
+            });
+          }
+
+          // Kirim kembali hasil eksekusi tool ke Gemini untuk menghasilkan balasan percakapan final
+          const followUpResponse = await this.client.models.generateContent({
+            model: modelName,
+            contents: [
+              { role: 'user', parts: [{ text: rawText }] },
+              response.candidates[0].content,
+              {
+                role: 'user',
+                parts: toolResponses.map((tr) => ({
+                  functionResponse: {
+                    name: tr.name,
+                    response: tr.response,
+                    ...(tr.id ? { id: tr.id } : {})
+                  }
+                }))
+              }
+            ],
+            config: {
+              systemInstruction
+            }
+          });
+
+          const followUpText = this.extractText(followUpResponse);
+          if (followUpText) {
+            return followUpText;
+          }
+        }
+
+        const initialText = this.extractText(response);
+        if (initialText) {
+          return initialText;
+        }
+      } catch (err) {
+        logger.warn('AI_AGENT', `Percobaan model ${modelName} gagal: ${err.message}. Mencoba model alternatif jika ada...`);
+      }
     }
+
+    logger.error('AI_AGENT', 'Semua kandidat model Gemini AI gagal merespon. Melanjutkan ke FSM fallback.');
+    return null;
   }
 }
 
