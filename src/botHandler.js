@@ -7,6 +7,7 @@ import { attendanceTracker } from './attendanceTracker.js';
 import { parseAttendanceChoice, parseTimeChoice, parseSectionChoice } from './responseParser.js';
 import { messageTemplates } from './messageTemplates.js';
 import { broadcastService } from './broadcastService.js';
+import { aiAgent } from './aiAgent.js';
 import { logger } from './logger.js';
 
 function sleep(ms) {
@@ -970,6 +971,22 @@ export async function handleIncomingMessage(sock, m) {
         );
         await sendMessage(sock, remoteJid, casualGreeting);
         return;
+      }
+
+      // Coba proses dengan AI Agent Gemini jika tersedia
+      if (aiAgent.isAvailable() && !isGenericGreeting) {
+        const aiReply = await aiAgent.processMessage({
+          effectivePhone,
+          rawText,
+          member,
+          knownName,
+          userIsAdmin
+        });
+
+        if (aiReply) {
+          await sendMessage(sock, remoteJid, aiReply);
+          return;
+        }
       }
 
       // Jika mengirim teks lain saat IDLE, tampilkan salam atau panduan

@@ -21,6 +21,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google/genai": "^2.20.0",
     "@whiskeysockets/baileys": "^6.7.14",
     "better-sqlite3": "^11.8.1",
     "dotenv": "^16.4.7",

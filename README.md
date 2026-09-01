@@ -30,6 +30,10 @@ Bot WhatsApp asisten absensi paduan suara & kegiatan interaktif berbasis **Node.
    - **Resolusi Identitas WhatsApp LID**: Verifikasi nomor HP eksplisit dan pemetaan permanen (`lid -> phone`).
 5. **Monitoring & Pencarian Admin Real-time**:
    - Pencarian anggota spesifik (`cari [Nama/No]`), daftar anggota per seksi (`anggota [seksi]`), rekapitulasi (`rekap`), daftar pending (`pending`), dan arsip riwayat (`riwayat`).
+6. **Google Gemini LLM Agent & Autonomous Tool Calling (Zero-Shot Extraction)**:
+   - Integrasi model AI cerdas **Google Gemini 2.5 Flash** (Free Tier 100% Gratis via `@google/genai`).
+   - Mampu memahami percakapan bebas, bahasa gaul, atau pesan multi-kalimat sekaligus, lalu mengeksekusi *Function Calling* (`recordAttendance`, `updateVoiceSection`, `updateMemberName`, `updateMemberRole`, `getEventSchedule`, `getMyProfile`) secara otomatis ke SQLite & Google Sheets.
+   - **Arsitektur Hybrid**: Jika API Key tidak diisi, bot tetap berjalan 100% menggunakan *Finite State Machine* (FSM) deterministik bawaan tanpa error.
 
 ---
 

@@ -12,4 +12,5 @@ export const config = {
   presenceTypingMs: parseInt(process.env.PRESENCE_TYPING_MS || '3000', 10),
   dbPath: process.env.DB_PATH || './absensi.db',
   logLevel: process.env.LOG_LEVEL || 'info',
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
 };
