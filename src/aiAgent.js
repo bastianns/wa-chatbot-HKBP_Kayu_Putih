@@ -273,7 +273,7 @@ export class AiAgent {
       return null;
     }
 
-    const currentEvent = eventManager.getEvent();
+    const currentEvent = this.eventManager.getEvent();
     const context = { effectivePhone, knownName, member, userIsAdmin, currentEvent };
 
     const systemInstruction = `
@@ -308,7 +308,7 @@ Panduan Sikap & Formatting:
       logger.info('AI_AGENT', `Mengirim pesan ke Gemini AI: "${rawText}" dari ${effectivePhone}`);
 
       const response = await this.client.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.6-flash',
         contents: rawText,
         config: {
           systemInstruction,
@@ -325,22 +325,24 @@ Panduan Sikap & Formatting:
           const result = await this.executeTool(fc.name, fc.args || {}, context);
           toolResponses.push({
             name: fc.name,
-            response: result
+            response: result,
+            id: fc.id
           });
         }
 
         // Kirim kembali hasil eksekusi tool ke Gemini untuk menghasilkan balasan percakapan final
         const followUpResponse = await this.client.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.6-flash',
           contents: [
             { role: 'user', parts: [{ text: rawText }] },
-            { role: 'model', parts: functionCalls.map(fc => ({ functionCall: fc })) },
+            response.candidates[0].content,
             {
               role: 'user',
-              parts: toolResponses.map(tr => ({
+              parts: toolResponses.map((tr) => ({
                 functionResponse: {
                   name: tr.name,
-                  response: tr.response
+                  response: tr.response,
+                  ...(tr.id ? { id: tr.id } : {})
                 }
               }))
             }
