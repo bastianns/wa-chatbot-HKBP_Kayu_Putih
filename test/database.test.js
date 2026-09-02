@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDatabase } from '../src/db.js';
+import { createDatabase, getDb, closeDb } from '../src/db.js';
 import { EventManager } from '../src/eventManager.js';
 import { AttendanceTracker } from '../src/attendanceTracker.js';
 import { MemberManager } from '../src/memberManager.js';
@@ -67,5 +67,29 @@ test('Database & Riwayat Event (SQLite)', async (t) => {
     // Pastikan getPastEvents mengembalikan kedua event
     const pastEvents = eventMgr.getPastEvents();
     assert.strictEqual(pastEvents.length, 2);
+  });
+});
+
+test('getDb Environment Guard & Lazy Singleton', async (t) => {
+  await t.test('getDb melempar error saat NODE_ENV=test dan dbPath file fisik', () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'test';
+    try {
+      assert.throws(
+        () => getDb('./production_test_sample.db'),
+        /Refusing to open production DB path in test environment/
+      );
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  await t.test('getDb(":memory:") berhasil membuat dan mengembalikan in-memory singleton', () => {
+    closeDb();
+    const memDb = getDb(':memory:');
+    assert.notStrictEqual(memDb, null);
+    const result = memDb.prepare('SELECT 1 as val').get();
+    assert.strictEqual(result.val, 1);
+    closeDb();
   });
 });

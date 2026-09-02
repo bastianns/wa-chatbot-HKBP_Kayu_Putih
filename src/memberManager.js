@@ -1,10 +1,18 @@
-import { db as defaultDb } from './db.js';
+import { getDb } from './db.js';
 import { config } from '../config.js';
 import { logger } from './logger.js';
 
 export class MemberManager {
-  constructor(dbInstance = defaultDb) {
-    this.db = dbInstance;
+  constructor(dbInstance = null) {
+    this._db = dbInstance;
+  }
+
+  get db() {
+    return this._db || getDb();
+  }
+
+  set db(instance) {
+    this._db = instance;
   }
 
   /**
@@ -80,20 +88,40 @@ export class MemberManager {
   }
 
   /**
-   * Simpan mapping permanen LID -> Phone
+   * Simpan mapping permanen LID -> Phone dengan jejak audit lid_mapping_history
    */
-  setLidMapping(lid, phone) {
+  setLidMapping(lid, phone, reason = null) {
     const cleanLid = this.normalizePhone(lid);
     const cleanPhone = this.normalizePhone(phone);
     if (!cleanLid || !cleanPhone) return false;
 
+    const existing = this.db.prepare('SELECT phone FROM lid_mappings WHERE lid = ?').get(cleanLid);
     const now = new Date().toISOString();
-    this.db.prepare(`
-      INSERT OR REPLACE INTO lid_mappings (lid, phone, created_at)
-      VALUES (?, ?, ?)
-    `).run(cleanLid, cleanPhone, now);
 
-    logger.info('MEMBER', `Mapping LID disimpan: ${cleanLid} -> ${cleanPhone}`);
+    const tx = this.db.transaction(() => {
+      if (existing) {
+        this.db.prepare(`
+          INSERT INTO lid_mapping_history (lid, old_phone, new_phone, changed_at, reason)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(cleanLid, existing.phone, cleanPhone, now, reason || 'MAPPING_UPDATE');
+      }
+
+      this.db.prepare(`
+        INSERT OR REPLACE INTO lid_mappings (lid, phone, created_at)
+        VALUES (?, ?, ?)
+      `).run(cleanLid, cleanPhone, now);
+    });
+
+    tx();
+
+    // Audit logging jika mapping mengarah ke akun admin
+    const isTargetAdmin = this.isAdmin(cleanPhone);
+    if (isTargetAdmin) {
+      logger.warn('LID_MAPPING', `⚠️ AUDIT: Mapping LID ${cleanLid} diarahkan ke nomor ADMIN/PENGURUS (${cleanPhone}). Pastikan verifikasi sah.`);
+    } else {
+      logger.info('MEMBER', `Mapping LID disimpan: ${cleanLid} -> ${cleanPhone}`);
+    }
+
     return true;
   }
 

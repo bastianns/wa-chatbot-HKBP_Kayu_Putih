@@ -21,6 +21,8 @@ sessions.json
 attendance_tracker.json
 event_config.json
 *.bak
+*.bak.*
+*.db.bak*
 *.json.bak
 
 # Node & Dependencies

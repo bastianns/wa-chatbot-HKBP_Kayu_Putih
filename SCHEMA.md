@@ -113,6 +113,18 @@ Menyimpan antrian pengiriman pesan broadcast per event agar bisa di-resume otoma
 | `error_message` | `TEXT` | `NULL` | Pesan error jika gagal |
 | `UNIQUE(event_id, target_tag, phone)` | `UNIQUE` | Mencegah double sending dalam sesi broadcast yang sama |
 
+### H. Tabel `lid_mapping_history` (Audit Trail Perubahan Pemetaan Identitas LID)
+Mencatat riwayat audit setiap kali ada pemetaan LID yang dibuat atau ditimpa, menjamin ketertelusuran akun admin maupun anggota biasa.
+
+| Nama Kolom | Tipe Data | Constraint | Deskripsi |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` | ID unik log audit |
+| `lid` | `TEXT` | `NOT NULL` | Identifier LID yang diubah |
+| `old_phone` | `TEXT` | `NULL` | Nomor HP sebelumnya (jika ada) |
+| `new_phone` | `TEXT` | `NOT NULL` | Nomor HP baru hasil pemetaan |
+| `changed_at` | `TEXT` | `NOT NULL` | Timestamp ISO8601 perubahan |
+| `reason` | `TEXT` | `NULL` | Alasan perubahan (misal: *USER_CONFIRMED_IDENTITY*, *CORRECTION_SWAPPED_PHONE_DATA*) |
+
 ---
 
 ## 🚦 2. Enum Status & Siklus Hidup
@@ -131,7 +143,8 @@ Menyimpan antrian pengiriman pesan broadcast per event agar bisa di-resume otoma
 
 ### C. State Percakapan (`sessions.step`)
 - `IDLE`: Sesi awal / tidak ada percakapan aktif.
-- `WAITING_LID_PHONE_CONFIRMATION`: Menunggu user mengonfirmasi nomor HP (khusus LID baru).
+- `WAITING_LID_PHONE_CONFIRMATION`: Menunggu user menginput nomor HP (khusus pengirim LID yang belum terpetakan).
+- `WAITING_LID_PHONE_CONFIRM_DOUBLE_CHECK`: Menunggu konfirmasi ganda (*ya* / *bukan*) dengan nomor tersamar sebelum mapping LID ke profil member yang sudah ada dieksekusi.
 - `WAITING_NAME_REGISTRATION`: Menunggu user menginput nama lengkap (minimal 2 kata yang valid). *Catatan: metadata `pushName` tidak pernah membypass langkah ini.*
 - `WAITING_ATTENDANCE`: Menunggu pilihan Hadir (1) / Tidak Hadir (2).
 - `WAITING_ONTIME`: Menunggu pilihan On-Time (A) / Telat (B).
@@ -148,3 +161,42 @@ Menyimpan antrian pengiriman pesan broadcast per event agar bisa di-resume otoma
 2. **Reminder (`remind.js` / State-Driven Dynamic Query)**:
    - Bersifat *Dynamic State-Driven Query* langsung dari `attendance_records` (`WHERE status IN ('WAITING_REPLY', 'PARTIAL_HADIR', 'PARTIAL_TIDAK')`).
    - Tidak memerlukan tabel antrian terpisah karena setiap eksekusi `remind` selalu mengambil data *live* real-time. Jika anggota baru saja membalas sebelum script remind selesai, anggota tersebut otomatis tidak lagi dikirimi pengingat.
+
+---
+
+## 🛡️ 4. Privasi Data & Integrasi AI (Kebijakan Zero PII Leakage)
+
+### A. Keputusan Sadar Pengurus Gereja (Per 2 September 2026)
+Pengurus gereja secara resmi memilih **Opsi 2: Anonimisasi Data Penuh Sebelum Dikirim ke Gemini API**. Fitur pemahaman bahasa alami (NLP) dipertahankan agar anggota dapat membalas secara fleksibel (contoh: *"Bisa hadir tapi telat jam 8 malam ya kak"*), namun dengan jaminan privasi data anggota gereja yang ketat.
+
+### B. Layanan Eksternal yang Digunakan
+- **Layanan:** Google Gemini API (Google Cloud AI).
+- **Library:** `@google/genai` (Node.js SDK resmi).
+- **Model:** `gemini-2.5-flash`, `gemini-2.0-flash` (dengan sistem fallback dan kuota resilience otomatis).
+
+### C. Pembatasan Data yang Dikirim (Allowlist Minimal)
+Hanya dua jenis data yang diizinkan dikirim ke server Google Gemini:
+1. **Isi Pesan Teks Mentah (`rawText`)**: Pesan percakapan yang diketik oleh pengguna.
+2. **Konteks Acara Publik**: Nama acara, jadwal latihan, lokasi gereja, target jam on-time, dan batas waktu konfirmasi (informasi yang bersifat publik dan memang diumumkan ke seluruh jemaat).
+
+### D. Data yang DILARANG KERAS / TIDAK PERNAH Dikirimkan (Zero PII)
+- ❌ **Nomor Telepon / WhatsApp** (`phone` / `effectivePhone`).
+- ❌ **Nama Lengkap Anggota** (`name` / `knownName`).
+- ❌ **Seksi Suara Vokal** (`seksi` - Sopran/Alto/Tenor/Bass).
+- ❌ **Peran / Jabatan Pelayanan di Gereja** (`peran` - Song Leader, BPH, Pengurus, dsb.).
+- ❌ **Riwayat Absensi & Catatan Medis/Alasan Anggota Sebelumnya**.
+
+### E. Arsitektur Structured Intent Classifier
+AI Gemini **TIDAK** digunakan untuk menyusun kalimat balasan akhir yang membutuhkan nama pribadi anggota. Gemini bertindak sebagai **Intent Classifier murni** yang mengembalikan JSON terstruktur:
+```json
+{
+  "intent": "ATTENDANCE_YES_LATE",
+  "arrivalTime": "20:00 WIB",
+  "reason": null,
+  "section": null,
+  "newName": null,
+  "role": null,
+  "replyText": null
+}
+```
+Seluruh perakitan kalimat sapaan ramah WhatsApp (menyapa nama Kakak, menyematkan detail acara, pembaruan ke SQLite, dan sinkronisasi ke Google Sheets) diproses **100% secara lokal** di dalam `botHandler.js` menggunakan data yang tersimpan di server lokal.

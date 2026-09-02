@@ -92,6 +92,15 @@ export function createDatabase(dbPath = config.dbPath) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS lid_mapping_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lid TEXT NOT NULL,
+      old_phone TEXT,
+      new_phone TEXT NOT NULL,
+      changed_at TEXT NOT NULL,
+      reason TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS broadcast_progress (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -110,6 +119,7 @@ export function createDatabase(dbPath = config.dbPath) {
     CREATE INDEX IF NOT EXISTS idx_attendance_phone ON attendance_records(phone);
     CREATE INDEX IF NOT EXISTS idx_attendance_status ON attendance_records(status);
     CREATE INDEX IF NOT EXISTS idx_lid_mappings_lid ON lid_mappings(lid);
+    CREATE INDEX IF NOT EXISTS idx_lid_mapping_history_lid ON lid_mapping_history(lid);
     CREATE INDEX IF NOT EXISTS idx_broadcast_event_tag ON broadcast_progress(event_id, target_tag);
   `);
 
@@ -145,6 +155,26 @@ export function runIncrementalMigrations(db) {
     }
 
     db.prepare('INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)').run(migrationIdV2, now);
+  }
+
+  // Migrasi v3: Tambah tabel lid_mapping_history untuk jejak audit mapping LID
+  const migrationIdV3 = 'v3_add_lid_mapping_history';
+  const isAppliedV3 = db.prepare('SELECT 1 FROM schema_migrations WHERE id = ?').get(migrationIdV3);
+
+  if (!isAppliedV3) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lid_mapping_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lid TEXT NOT NULL,
+        old_phone TEXT,
+        new_phone TEXT NOT NULL,
+        changed_at TEXT NOT NULL,
+        reason TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_lid_mapping_history_lid ON lid_mapping_history(lid);
+    `);
+    logger.info('DB_MIGRATION', 'Menambahkan tabel "lid_mapping_history" untuk jejak audit mapping LID.');
+    db.prepare('INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)').run(migrationIdV3, now);
   }
 }
 
@@ -344,6 +374,34 @@ export function migrateJsonToSqlite(db, options = {}) {
   return { applied: true, id: migrationId };
 }
 
-// Global Singleton DB
-export const db = createDatabase();
-migrateJsonToSqlite(db);
+let singletonDb = null;
+
+/**
+ * Mengambil singleton instance SQLite Database dengan lazy initialization.
+ * Guard: Menolak membuka DB file fisik jika di lingkungan testing (NODE_ENV === 'test').
+ */
+export function getDb(dbPath = config.dbPath) {
+  const isMemory = dbPath === ':memory:';
+
+  if (process.env.NODE_ENV === 'test' && !isMemory) {
+    throw new Error('Refusing to open production DB path in test environment');
+  }
+
+  if (!singletonDb) {
+    singletonDb = createDatabase(dbPath);
+  }
+
+  return singletonDb;
+}
+
+/**
+ * Menutup singleton database dan mereset instance (berguna saat teardown)
+ */
+export function closeDb() {
+  if (singletonDb) {
+    try {
+      singletonDb.close();
+    } catch (e) {}
+    singletonDb = null;
+  }
+}
