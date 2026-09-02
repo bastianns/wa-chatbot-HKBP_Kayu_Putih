@@ -1,5 +1,6 @@
 import path from 'path';
 import { config } from '../config.js';
+import { getDb, migrateJsonToSqlite } from './db.js';
 import { eventManager } from './eventManager.js';
 import { memberManager } from './memberManager.js';
 import { messageTemplates } from './messageTemplates.js';
@@ -10,6 +11,10 @@ import { logger } from './logger.js';
 const AUTH_DIR = path.resolve('./auth_info_baileys');
 
 async function main() {
+  // Inisialisasi eksplisit database dan migrasi
+  const db = getDb();
+  migrateJsonToSqlite(db);
+
   const args = process.argv.slice(2);
   let targetTag = 'all';
   let isDryRun = false;
@@ -35,18 +40,49 @@ async function main() {
   }
 
   const currentEvent = eventManager.getEvent();
-  const totalMinutes = Math.round((members.length * 20) / 60);
+  const toSend = [];
+  const skippedAlreadyResponded = [];
+
+  // Pengecekan Shared via broadcastService.isAlreadyResponded (Poin 2 & Poin 5)
+  for (const m of members) {
+    const phone = memberManager.normalizePhone(m.phone);
+    if (!phone) continue;
+
+    if (broadcastService.isAlreadyResponded(phone, currentEvent.id)) {
+      const rec = broadcastService.getAttendanceRecord(phone, currentEvent.id);
+      skippedAlreadyResponded.push({
+        member: m,
+        status: rec ? rec.status : 'RESPONDED',
+        choice: rec && rec.attendance_choice ? rec.attendance_choice : '-'
+      });
+    } else {
+      toSend.push(m);
+    }
+  }
+
+  const totalMinutes = Math.round((toSend.length * 20) / 60);
 
   console.log('====================================================');
   console.log(`📋  RINGKASAN TARGET BROADCAST [${targetTag.toUpperCase()}]`);
   console.log('====================================================');
-  console.log(`👥  Jumlah Penerima    : ${members.length} anggota`);
-  console.log(`📌  Nama Acara         : ${currentEvent.namaAcara}`);
+  console.log(`👥  Total Target       : ${members.length} anggota`);
+  console.log(`⏭️  Sudah Absen (Skip) : ${skippedAlreadyResponded.length} anggota`);
+  console.log(`📩  Akan Dihubungi     : ${toSend.length} anggota`);
+  console.log(`📌  Nama Acara         : ${currentEvent.namaAcara} (ID: #${currentEvent.id})`);
   console.log(`🗓️  Waktu Latihan      : ${currentEvent.waktuLatihan}`);
   console.log(`📍  Lokasi             : ${currentEvent.lokasi}`);
   console.log(`🎯  Tujuan             : ${currentEvent.tujuan}`);
   console.log(`🛡️  Jeda Anti-Ban      : ${config.minDelayMs / 1000}s - ${config.maxDelayMs / 1000}s per orang`);
-  console.log(`⏱️  Estimasi Waktu     : ± ${totalMinutes > 0 ? totalMinutes : 1} menit`);
+  console.log(`⏱️  Estimasi Waktu     : ± ${totalMinutes > 0 ? totalMinutes : (toSend.length > 0 ? 1 : 0)} menit`);
+
+  if (skippedAlreadyResponded.length > 0) {
+    console.log('----------------------------------------------------');
+    console.log('⏭️  DAFTAR ANGGOTA DILEWATI (SUDAH ABSEN DI EVENT INI):');
+    skippedAlreadyResponded.forEach((s, idx) => {
+      console.log(`   ${idx + 1}. ${s.member.name || '(Anggota)'} (${s.member.phone}) - [Status: ${s.status} / Pilihan: ${s.choice}]`);
+    });
+  }
+
   console.log('----------------------------------------------------');
   console.log('💬  1. PREVIEW PESAN UNTUK ANGGOTA BARU (TANYA NAMA):');
   console.log('----------------------------------------------------');
@@ -56,12 +92,12 @@ async function main() {
   console.log('----------------------------------------------------');
   console.log(messageTemplates.getKnownMemberGreeting('Bastian', currentEvent));
   console.log('----------------------------------------------------');
-  console.log('📱  DAFTAR 5 PENERIMA PERTAMA:');
-  members.slice(0, 5).forEach((m, idx) => {
+  console.log('📱  DAFTAR 5 PENERIMA PERTAMA (YANG AKAN DIHUBUNGI):');
+  toSend.slice(0, 5).forEach((m, idx) => {
     console.log(`   ${idx + 1}. ${m.name || '(Nama akan ditanyakan bot)'} (${m.phone}) - [${m.seksi || 'Umum'}]`);
   });
-  if (members.length > 5) {
-    console.log(`   ... dan ${members.length - 5} anggota lainnya.`);
+  if (toSend.length > 5) {
+    console.log(`   ... dan ${toSend.length - 5} anggota lainnya.`);
   }
   console.log('====================================================\n');
 
@@ -69,6 +105,11 @@ async function main() {
     console.log('🔍 [MODE PREVIEW / DRY-RUN] Selesai.');
     console.log('ℹ️  Tidak ada pesan yang dikirim ke WhatsApp.');
     console.log(`💡 Untuk mengirim sungguhan, jalankan: npm run broadcast -- ${targetTag === 'TargetKoor' ? 'target' : targetTag}\n`);
+    process.exit(0);
+  }
+
+  if (toSend.length === 0) {
+    console.log('🎉 Semua anggota pada target ini sudah tercatat merespon di Event ini. Tidak ada pesan yang perlu dikirim.');
     process.exit(0);
   }
 
@@ -87,10 +128,11 @@ async function main() {
 
       if (result.status === 'completed') {
         console.log('\n====================================================');
-        console.log('🎉 SEMUA PESAN TARGET TELAH SELESAI DIKIRIM!');
-        console.log(`• Berhasil Terkirim : ${result.successCount} kontak`);
-        console.log(`• Gagal Terkirim    : ${result.failCount} kontak`);
-        console.log(`• Sebelumnya Terkirim: ${result.previouslySent} kontak`);
+        console.log('🎉 SEMUA PESAN TARGET TELAH SELESAI DIPROSES!');
+        console.log(`• Berhasil Terkirim   : ${result.successCount} kontak`);
+        console.log(`• Dilewati (Sudah Ada): ${result.skippedCount} kontak`);
+        console.log(`• Gagal Terkirim      : ${result.failCount} kontak`);
+        console.log(`• Sebelumnya Diproses : ${result.previouslyDone} kontak`);
         console.log('====================================================');
         console.log('💡 Bot utama (npm start) akan otomatis mencatat balasan mereka ke Google Sheets secara real-time.\n');
         process.exit(0);

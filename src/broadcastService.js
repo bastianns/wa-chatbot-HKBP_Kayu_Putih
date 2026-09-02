@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { db } from './db.js';
+import { getDb } from './db.js';
 import { memberManager } from './memberManager.js';
 import { eventManager } from './eventManager.js';
 import { stateManager } from './stateManager.js';
@@ -19,25 +19,79 @@ function getRandomDelay(min, max) {
 
 let isBroadcasting = false;
 
+// Status absensi yang dianggap sudah final dan harus di-skip dari broadcast
+export const FINAL_ATTENDANCE_STATUSES = ['RESPONDED', 'PARTIAL_HADIR'];
+
 export const broadcastService = {
+  get db() {
+    return this._db || getDb();
+  },
+
+  set db(instance) {
+    this._db = instance;
+  },
+
   isBroadcasting() {
     return isBroadcasting;
+  },
+
+  /**
+   * Pengecekan Shared Tunggal: Cek apakah nomor sudah merespon final di event aktif
+   */
+  isAlreadyResponded(phone, eventId) {
+    const cleanPhone = memberManager.normalizePhone(phone);
+    if (!cleanPhone) return false;
+
+    const row = this.db.prepare(`
+      SELECT status FROM attendance_records 
+      WHERE phone = ? AND event_id = ?
+      ORDER BY responded_at DESC LIMIT 1
+    `).get(cleanPhone, eventId);
+
+    return row ? FINAL_ATTENDANCE_STATUSES.includes(row.status) : false;
+  },
+
+  /**
+   * Mengambil status record detail untuk keperluan log / display preview
+   */
+  getAttendanceRecord(phone, eventId) {
+    const cleanPhone = memberManager.normalizePhone(phone);
+    if (!cleanPhone) return null;
+
+    return this.db.prepare(`
+      SELECT status, attendance_choice, keterangan, name
+      FROM attendance_records 
+      WHERE phone = ? AND event_id = ?
+      ORDER BY responded_at DESC LIMIT 1
+    `).get(cleanPhone, eventId) || null;
   },
 
   /**
    * Mengambil atau menginisialisasi antrian broadcast_progress untuk event dan target tertentu
    */
   initBroadcastQueue(eventId, targetTag, members) {
-    const insertStmt = db.prepare(`
-      INSERT OR IGNORE INTO broadcast_progress (event_id, target_tag, phone, name, status)
+    const insertStmt = this.db.prepare(`
+      INSERT INTO broadcast_progress (event_id, target_tag, phone, name, status)
       VALUES (?, ?, ?, ?, 'PENDING')
+      ON CONFLICT(event_id, target_tag, phone) DO UPDATE SET
+        name = excluded.name
     `);
 
-    const initTx = db.transaction(() => {
+    const initTx = this.db.transaction(() => {
+      const activePhones = [];
       for (const m of members) {
         const phone = memberManager.normalizePhone(m.phone);
         if (!phone) continue;
+        activePhones.push(phone);
         insertStmt.run(eventId, targetTag, phone, m.name || '');
+      }
+
+      if (activePhones.length > 0) {
+        const inClause = activePhones.map((p) => `'${p}'`).join(',');
+        this.db.prepare(`
+          DELETE FROM broadcast_progress
+          WHERE event_id = ? AND target_tag = ? AND phone NOT IN (${inClause})
+        `).run(eventId, targetTag);
       }
     });
 
@@ -45,7 +99,7 @@ export const broadcastService = {
   },
 
   /**
-   * Menjalankan loop broadcast dengan dukungan Resume, Reconnect, dan Fast Abort saat koneksi putus
+   * Menjalankan loop broadcast dengan dukungan Smart Skip, Resume, Reconnect, dan Fast Abort
    */
   async runBroadcast({ sock, targetTag = 'all', adminJid = null, onProgress = null }) {
     let tag = targetTag;
@@ -70,21 +124,22 @@ export const broadcastService = {
     const currentEvent = eventManager.getEvent();
     const eventId = currentEvent.id;
 
-    // Pastikan antrian tersimpan di database untuk resume
+    // Inisialisasi antrian jika belum ada
     this.initBroadcastQueue(eventId, tag, members);
 
-    // Ambil list yang statusnya masih PENDING atau FAILED
-    const pendingRows = db.prepare(`
+    // Ambil list antrian yang belum selesai (filter SENT dan SKIPPED_ALREADY_RESPONDED)
+    const pendingRows = this.db.prepare(`
       SELECT * FROM broadcast_progress 
-      WHERE event_id = ? AND target_tag = ? AND status != 'SENT'
+      WHERE event_id = ? AND target_tag = ? AND status NOT IN ('SENT', 'SKIPPED_ALREADY_RESPONDED')
       ORDER BY id ASC
     `).all(eventId, tag);
 
-    const alreadySentCount = members.length - pendingRows.length;
-    logger.info('BROADCAST', `Memulai broadcast ke [${tag}]. Total: ${members.length}, Sudah terkirim sebelumnya: ${alreadySentCount}, Sisa: ${pendingRows.length}`);
+    const alreadyDoneCount = members.length - pendingRows.length;
+    logger.info('BROADCAST', `Memulai broadcast ke [${tag}]. Total: ${members.length}, Selesai sebelumnya: ${alreadyDoneCount}, Sisa antrian: ${pendingRows.length}`);
 
     let successCount = 0;
     let failCount = 0;
+    let skippedCount = 0;
     let stoppedDueToConnection = false;
 
     try {
@@ -96,6 +151,45 @@ export const broadcastService = {
         const name = (member && isValidName(member.name)) ? member.name.trim() : (isValidName(item.name) ? item.name.trim() : '');
         const seksi = member?.seksi || 'Umum';
 
+        // 🛡️ REAL-TIME JIT CHECK: Cek status terkini di DB SEBELUM update session atau kirim WA
+        if (this.isAlreadyResponded(phone, eventId)) {
+          const rec = this.getAttendanceRecord(phone, eventId);
+          const foundStatus = rec ? `${rec.status} (${rec.attendance_choice || '-'})` : 'RESPONDED';
+          const now = new Date().toISOString();
+
+          this.db.prepare(`
+            UPDATE broadcast_progress 
+            SET status = 'SKIPPED_ALREADY_RESPONDED', sent_at = ?, error_message = ? 
+            WHERE event_id = ? AND target_tag = ? AND phone = ?
+          `).run(now, `Sudah absen di Event #${eventId} (Status: ${foundStatus})`, eventId, tag, phone);
+
+          skippedCount++;
+          logger.info('BROADCAST', `⏭️ [Dilewati] ${name || '(Nomor Baru)'} (${phone}) - Sudah Absen (${foundStatus})`);
+
+          if (onProgress) {
+            onProgress({
+              current: alreadyDoneCount + i + 1,
+              total: members.length,
+              successCount,
+              failCount,
+              skippedCount,
+              phone,
+              name,
+              sentOk: false,
+              skipped: true
+            });
+          }
+
+          // Tetap jalankan jeda anti-ban agar ritme pengiriman tetap natural
+          if (i < pendingRows.length - 1) {
+            const delay = getRandomDelay(config.minDelayMs, config.maxDelayMs);
+            logger.debug('BROADCAST', `Jeda anti-ban ${Math.round(delay / 1000)} detik...`);
+            await sleep(delay);
+          }
+          continue; // Lewati orang ini, jangan update session, jangan kirim WA
+        }
+
+        // Siapkan sesi percakapan hanya jika belum absen
         const session = stateManager.getSession(jid, name || 'Saudara/i');
         session.data.seksi = seksi;
         session.data.namaAcara = currentEvent.namaAcara;
@@ -140,7 +234,7 @@ export const broadcastService = {
           if (isConnErr) {
             logger.warn('BROADCAST', `⚠️ Koneksi WhatsApp terputus saat mencoba mengirim ke ${phone}: ${errMsg}. Menghentikan antrian broadcast segera.`);
             stoppedDueToConnection = true;
-            break; // HENTIKAN LOOP SEGERA - jangan loop anggota berikutnya, jangan delay anti-ban
+            break;
           } else {
             failCount++;
             logger.error('BROADCAST', `Gagal mengirim ke nomor ${phone} (error level nomor): ${errMsg}`, err);
@@ -150,19 +244,16 @@ export const broadcastService = {
         const now = new Date().toISOString();
 
         if (sentOk) {
-          // Tandai di progress database
-          db.prepare(`
+          this.db.prepare(`
             UPDATE broadcast_progress 
             SET status = 'SENT', sent_at = ?, error_message = NULL 
             WHERE event_id = ? AND target_tag = ? AND phone = ?
           `).run(now, eventId, tag, phone);
 
-          // Tandai di attendance tracker
           attendanceTracker.markSent(phone, isValidName(name) ? name : 'Nomor Baru', seksi, eventId);
-          logger.info('BROADCAST', `[${alreadySentCount + i + 1}/${members.length}] ✅ Terkirim ke: ${name || '(Nomor Baru)'} (${phone})`);
+          logger.info('BROADCAST', `[${alreadyDoneCount + i + 1}/${members.length}] ✅ Terkirim ke: ${name || '(Nomor Baru)'} (${phone})`);
         } else {
-          // Hanya tandai FAILED jika error level nomor (bukan koneksi terputus)
-          db.prepare(`
+          this.db.prepare(`
             UPDATE broadcast_progress 
             SET status = 'FAILED', error_message = ? 
             WHERE event_id = ? AND target_tag = ? AND phone = ?
@@ -171,13 +262,15 @@ export const broadcastService = {
 
         if (onProgress) {
           onProgress({
-            current: alreadySentCount + i + 1,
+            current: alreadyDoneCount + i + 1,
             total: members.length,
             successCount,
             failCount,
+            skippedCount,
             phone,
             name,
-            sentOk
+            sentOk,
+            skipped: false
           });
         }
 
@@ -199,8 +292,9 @@ export const broadcastService = {
         total: members.length,
         successCount,
         failCount,
-        previouslySent: alreadySentCount,
-        remainingPending: members.length - (alreadySentCount + successCount)
+        skippedCount,
+        previouslyDone: alreadyDoneCount,
+        remainingPending: members.length - (alreadyDoneCount + successCount + skippedCount)
       };
     }
 
@@ -210,7 +304,8 @@ export const broadcastService = {
       total: members.length,
       successCount,
       failCount,
-      previouslySent: alreadySentCount
+      skippedCount,
+      previouslyDone: alreadyDoneCount
     };
   }
 };
