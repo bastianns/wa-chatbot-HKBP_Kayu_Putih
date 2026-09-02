@@ -1,23 +1,15 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { logger } from './logger.js';
-import { memberManager as defaultMemberManager } from './memberManager.js';
-import { eventManager as defaultEventManager } from './eventManager.js';
-import { attendanceTracker as defaultAttendanceTracker } from './attendanceTracker.js';
-import { sendToGoogleSheets } from './sheetsService.js';
-import { parseSectionChoice } from './responseParser.js';
-import { cleanNameInput, isValidName } from './botHandler.js';
 
 export class AiAgent {
-  constructor(apiKey = config.geminiApiKey, dependencies = {}) {
+  constructor(apiKey = config.geminiApiKey) {
     this.apiKey = apiKey;
     this.client = null;
     if (this.apiKey) {
       this.client = new GoogleGenAI({ apiKey: this.apiKey });
     }
-    this.memberManager = dependencies.memberManager || defaultMemberManager;
-    this.eventManager = dependencies.eventManager || defaultEventManager;
-    this.attendanceTracker = dependencies.attendanceTracker || defaultAttendanceTracker;
+    this.modelCooldowns = new Map();
   }
 
   /**
@@ -28,255 +20,136 @@ export class AiAgent {
   }
 
   /**
-   * Definisi Tools / Functions untuk Gemini Function Calling
+   * Memproses pesan teks mentah pengguna (rawText) dan konteks acara publik (eventContext).
+   * 
+   * KEBIJAKAN PRIVASI DATA:
+   * Fungsi ini HANYA menerima rawText dan info acara publik.
+   * TIDAK ADA nomor HP, nama anggota, seksi suara, atau peran gereja yang dikirimkan
+   * ke Google Gemini API dalam bentuk apa pun.
+   * 
+   * Mengembalikan: Object intent terstruktur
+   * {
+   *   intent: "ATTENDANCE_YES_ONTIME" | "ATTENDANCE_YES_LATE" | "ATTENDANCE_YES_PENDING_TIME" |
+   *           "ATTENDANCE_NO" | "UPDATE_VOICE_SECTION" | "UPDATE_NAME" | "UPDATE_ROLE" |
+   *           "ASK_SCHEDULE" | "ASK_PROFILE" | "CASUAL_CHAT" | "UNKNOWN",
+   *   arrivalTime: string | null,
+   *   reason: string | null,
+   *   section: string | null,
+   *   newName: string | null,
+   *   role: string | null,
+   *   replyText: string | null
+   * }
    */
-  getToolDeclarations() {
-    return [
-      {
-        functionDeclarations: [
-          {
-            name: 'recordAttendance',
-            description: 'Mencatat atau memperbarui konfirmasi kehadiran anggota untuk acara latihan paduan suara aktif.',
-            parameters: {
-              type: 'OBJECT',
-              properties: {
-                attendanceChoice: {
-                  type: 'STRING',
-                  description: 'Pilihan kehadiran: "Bisa" (jika hadir) atau "Tidak Bisa" (jika berhalangan/absen).',
-                },
-                isLate: {
-                  type: 'BOOLEAN',
-                  description: 'True jika hadir namun terlambat / telat, False jika on-time tepat waktu.',
-                },
-                arrivalTime: {
-                  type: 'STRING',
-                  description: 'Estimasi waktu / jam kedatangan jika telat (contoh: "20:15 WIB" atau "Pukul 20:30").',
-                },
-                reason: {
-                  type: 'STRING',
-                  description: 'Alasan jika tidak bisa hadir (contoh: "Lembur kantor", "Sakit flu", "Acara keluarga").',
-                }
-              },
-              required: ['attendanceChoice']
-            }
-          },
-          {
-            name: 'updateVoiceSection',
-            description: 'Mengatur atau mengubah seksi suara vokal paduan suara anggota (Sopran 1/2, Alto 1/2, Tenor 1/2, Bass 1/2, Pemusik, Umum).',
-            parameters: {
-              type: 'OBJECT',
-              properties: {
-                section: {
-                  type: 'STRING',
-                  description: 'Nama seksi suara (contoh: "Sopran 1", "Sopran 2", "Alto 1", "Alto 2", "Tenor 1", "Tenor 2", "Bass 1", "Bass 2", "Pemusik", "Umum").',
-                }
-              },
-              required: ['section']
-            }
-          },
-          {
-            name: 'updateMemberName',
-            description: 'Memperbarui nama lengkap resmi anggota di database dan daftar absensi.',
-            parameters: {
-              type: 'OBJECT',
-              properties: {
-                newName: {
-                  type: 'STRING',
-                  description: 'Nama lengkap baru anggota (minimal 2 kata, contoh: "Bastian Sibarani").',
-                }
-              },
-              required: ['newName']
-            }
-          },
-          {
-            name: 'updateMemberRole',
-            description: 'Memperbarui peran atau bidang pelayanan anggota di NHKBP Kayu Putih (contoh: Song Leader, Seksi Rohani & Musik, Pengurus, Pemusik, Anggota Naposobulung).',
-            parameters: {
-              type: 'OBJECT',
-              properties: {
-                role: {
-                  type: 'STRING',
-                  description: 'Nama peran atau bidang pelayanan baru.',
-                }
-              },
-              required: ['role']
-            }
-          },
-          {
-            name: 'getEventSchedule',
-            description: 'Mengambil jadwal dan detail informasi latihan aktif terdekat saat ini.',
-            parameters: {
-              type: 'OBJECT',
-              properties: {}
-            }
-          },
-          {
-            name: 'getMyProfile',
-            description: 'Mengambil data profil lengkap anggota (nama, seksi suara, peran, dan status kehadiran latihan terdekat).',
-            parameters: {
-              type: 'OBJECT',
-              properties: {}
-            }
-          }
-        ]
-      }
-    ];
-  }
-
-  /**
-   * Eksekusi Function Call dari Gemini
-   */
-  async executeTool(toolName, args, context) {
-    const { effectivePhone, knownName, member, currentEvent } = context;
-    logger.info('AI_AGENT', `Executing tool: ${toolName} with args: ${JSON.stringify(args)}`);
-
-    switch (toolName) {
-      case 'recordAttendance': {
-        const choice = args.attendanceChoice === 'Tidak Bisa' ? 'Tidak Bisa' : 'Bisa';
-        let keterangan = '-';
-        let alasan = '-';
-        let status = 'RESPONDED';
-
-        if (choice === 'Bisa') {
-          if (args.isLate && args.arrivalTime) {
-            keterangan = `Telat (${args.arrivalTime})`;
-          } else if (args.isLate) {
-            keterangan = 'Telat';
-          } else {
-            keterangan = `On-Time (${currentEvent.targetOnTime || '19:00 WIB'})`;
-          }
-        } else {
-          alasan = args.reason || 'Berhalangan';
-        }
-
-        const payload = {
-          nama: knownName || member?.name || 'Anggota',
-          seksi: member?.seksi || 'Umum',
-          status: choice,
-          keterangan,
-          alasan,
-          namaAcara: currentEvent.namaAcara,
-          tanggalLatihan: currentEvent.waktuLatihan,
-          nomorWa: effectivePhone
-        };
-
-        this.attendanceTracker.markResponded(effectivePhone, payload, status);
-        await sendToGoogleSheets(payload);
-
-        return {
-          success: true,
-          message: `Kehadiran berhasil dicatat untuk ${payload.nama}: ${choice} (${choice === 'Bisa' ? keterangan : alasan}). Tersinkronisasi ke Google Sheets.`
-        };
-      }
-
-      case 'updateVoiceSection': {
-        const parsed = parseSectionChoice(args.section);
-        const finalSection = parsed !== 'UNKNOWN' ? parsed : args.section;
-        const now = new Date().toISOString();
-
-        this.memberManager.registerOrUpdate(effectivePhone, knownName || member?.name || 'Anggota', finalSection);
-        this.attendanceTracker.db.prepare('UPDATE attendance_records SET seksi = ?, updated_at = ? WHERE event_id = ? AND phone = ?')
-          .run(finalSection, now, currentEvent.id, effectivePhone);
-
-        const existingAttendance = this.attendanceTracker.getAttendance(effectivePhone, currentEvent.id);
-        if (existingAttendance && existingAttendance.status === 'RESPONDED') {
-          await sendToGoogleSheets({
-            ...existingAttendance,
-            nama: knownName || member?.name || 'Anggota',
-            seksi: finalSection,
-            status: existingAttendance.attendance_choice || 'Bisa',
-            keterangan: existingAttendance.keterangan || '-',
-            alasan: existingAttendance.alasan || '-',
-            namaAcara: currentEvent.namaAcara,
-            tanggalLatihan: currentEvent.waktuLatihan,
-            nomorWa: effectivePhone
-          });
-        }
-
-        return {
-          success: true,
-          section: finalSection,
-          message: `Seksi suara berhasil diatur ke: ${finalSection} dan disinkronkan ke rekap.`
-        };
-      }
-
-      case 'updateMemberName': {
-        const cleaned = cleanNameInput(args.newName);
-        if (!isValidName(cleaned)) {
-          return { success: false, message: 'Nama tidak valid (minimal 2 kata dan harus berupa nama orang yang jelas).' };
-        }
-
-        const now = new Date().toISOString();
-        this.memberManager.registerOrUpdate(effectivePhone, cleaned, member?.seksi, 'NHKBP Kayu Putih');
-        this.attendanceTracker.db.prepare('UPDATE attendance_records SET name = ?, updated_at = ? WHERE event_id = ? AND phone = ?')
-          .run(cleaned, now, currentEvent.id, effectivePhone);
-
-        const existingAttendance = this.attendanceTracker.getAttendance(effectivePhone, currentEvent.id);
-        if (existingAttendance && existingAttendance.status === 'RESPONDED') {
-          await sendToGoogleSheets({
-            ...existingAttendance,
-            nama: cleaned,
-            seksi: member?.seksi || 'Umum',
-            status: existingAttendance.attendance_choice || 'Bisa',
-            keterangan: existingAttendance.keterangan || '-',
-            alasan: existingAttendance.alasan || '-',
-            namaAcara: currentEvent.namaAcara,
-            tanggalLatihan: currentEvent.waktuLatihan,
-            nomorWa: effectivePhone
-          });
-        }
-
-        return {
-          success: true,
-          name: cleaned,
-          message: `Nama lengkap berhasil diperbarui menjadi: ${cleaned}.`
-        };
-      }
-
-      case 'updateMemberRole': {
-        this.memberManager.updatePeran(effectivePhone, args.role);
-        return {
-          success: true,
-          role: args.role,
-          message: `Peran / bidang pelayanan berhasil diperbarui menjadi: ${args.role}.`
-        };
-      }
-
-      case 'getEventSchedule': {
-        return {
-          success: true,
-          event: currentEvent
-        };
-      }
-
-      case 'getMyProfile': {
-        const att = this.attendanceTracker.getAttendance(effectivePhone, currentEvent.id);
-        return {
-          success: true,
-          name: knownName || member?.name || '(Belum terdaftar)',
-          seksi: member?.seksi || 'Umum',
-          peran: member?.peran || 'Anggota Naposobulung',
-          event: currentEvent.namaAcara,
-          eventDate: currentEvent.waktuLatihan,
-          attendance: att
-            ? {
-                status: att.status,
-                choice: att.attendance_choice || 'Belum konfirmasi',
-                keterangan: att.keterangan || '-',
-                alasan: att.alasan || '-'
-              }
-            : {
-                status: 'NOT_RESPONDED',
-                choice: 'Belum mengisi konfirmasi',
-                keterangan: '-',
-                alasan: '-'
-              }
-        };
-      }
-
-      default:
-        return { success: false, message: `Tool ${toolName} tidak dikenal.` };
+  async processMessage({ rawText, eventContext = {} }) {
+    if (!this.isAvailable() || !this.client || !rawText || typeof rawText !== 'string') {
+      return null;
     }
+
+    const {
+      namaAcara = 'Latihan Paduan Suara NHKBP Kayu Putih',
+      waktuLatihan = 'Akan diinfokan',
+      lokasi = 'Gereja HKBP Kayu Putih',
+      targetOnTime = '19:00 WIB',
+      batasWaktu = 'Sebelum latihan dimulai'
+    } = eventContext;
+
+    const systemInstruction = `
+Anda adalah AI Intent Classifier untuk Bot Absensi Paduan Suara Gereja (NHKBP Kayu Putih).
+Tugas Anda adalah membaca pesan teks percakapan masuk dari seorang anggota dan mengklasifikasikan intent serta mengekstrak entitas ke dalam format JSON yang valid.
+
+KONTEKS ACARA PUBLIK:
+- Acara: ${namaAcara}
+- Waktu: ${waktuLatihan}
+- Lokasi: ${lokasi}
+- Target On-Time: ${targetOnTime}
+- Batas Pengisian: ${batasWaktu}
+
+DAFTAR INTENT YANG DIDUKUNG:
+1. "ATTENDANCE_YES_ONTIME" -> Jika anggota menyatakan bisa hadir dan tepat waktu/on-time.
+2. "ATTENDANCE_YES_LATE" -> Jika anggota menyatakan bisa hadir tapi terlambat/telat, sertakan perkiraan jam di "arrivalTime" (contoh: "20:00 WIB", "20:30").
+3. "ATTENDANCE_YES_PENDING_TIME" -> Jika anggota menyatakan bisa hadir tapi telat dan belum tahu jam berapa.
+4. "ATTENDANCE_NO" -> Jika anggota berhalangan/tidak bisa hadir, sertakan alasan di "reason" (contoh: "Lembur kantor", "Sakit", "Acara keluarga").
+5. "UPDATE_VOICE_SECTION" -> Jika anggota ingin memilih/mengubah seksi suara vokal (Sopran 1/2, Alto 1/2, Tenor 1/2, Bass 1/2, Pemusik, Umum), sertakan di "section".
+6. "UPDATE_NAME" -> Jika anggota ingin mengubah nama lengkapnya, sertakan nama baru di "newName".
+7. "UPDATE_ROLE" -> Jika anggota ingin mengubah peran/pelayanan gerejanya (contoh: Song Leader, Pemusik, BPH), sertakan di "role".
+8. "ASK_SCHEDULE" -> Jika anggota menanyakan jadwal, tanggal, waktu, atau lokasi latihan.
+9. "ASK_PROFILE" -> Jika anggota menanyakan profil diri atau status absensinya ("cek absen saya", "apakah saya sudah absen").
+10. "CASUAL_CHAT" -> Jika pesan berupa salam, ucapan terima kasih, humor, atau obrolan santai yang bukan perintah absensi. Tulis kalimat balasan umum yang ramah, sopan, dan bernuansa gerejawi di "replyText" TANPA menyebut nama atau nomor orang tertentu.
+11. "UNKNOWN" -> Jika pesan tidak dapat dipahami atau tidak cocok dengan intent di atas.
+
+FORMAT OUTPUT:
+Wajib mengembalikan JSON murni dengan schema:
+{
+  "intent": "ATTENDANCE_YES_ONTIME" | "ATTENDANCE_YES_LATE" | "ATTENDANCE_YES_PENDING_TIME" | "ATTENDANCE_NO" | "UPDATE_VOICE_SECTION" | "UPDATE_NAME" | "UPDATE_ROLE" | "ASK_SCHEDULE" | "ASK_PROFILE" | "CASUAL_CHAT" | "UNKNOWN",
+  "arrivalTime": string | null,
+  "reason": string | null,
+  "section": string | null,
+  "newName": string | null,
+  "role": string | null,
+  "replyText": string | null
+}
+`.trim();
+
+    const candidateModels = [
+      ...(config.geminiModel ? [config.geminiModel] : []),
+      'gemini-3.6-flash',
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-flash-latest',
+      'gemini-flash-lite-latest'
+    ].filter((v, i, a) => a.indexOf(v) === i);
+
+    logger.info('AI_AGENT', 'Mengirim raw text ke Gemini AI untuk klasifikasi intent (Anonymized)');
+
+    const userMessageContent = { role: 'user', parts: [{ text: rawText }] };
+    const contents = [userMessageContent];
+    const now = Date.now();
+
+    for (const modelName of candidateModels) {
+      if (this.modelCooldowns.has(modelName) && this.modelCooldowns.get(modelName) > now) {
+        continue;
+      }
+      try {
+        const response = await this.client.models.generateContent({
+          model: modelName,
+          contents,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json'
+          }
+        });
+
+        const text = this.extractText(response);
+        if (text) {
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed && parsed.intent) {
+              return parsed;
+            }
+          } catch (jsonErr) {
+            const cleanedJson = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+            const parsed = JSON.parse(cleanedJson);
+            if (parsed && parsed.intent) {
+              return parsed;
+            }
+          }
+        }
+      } catch (err) {
+        const isQuotaOrRateLimit =
+          err.status === 'RESOURCE_EXHAUSTED' ||
+          err.message?.includes('429') ||
+          err.message?.toLowerCase().includes('quota');
+
+        if (isQuotaOrRateLimit) {
+          this.modelCooldowns.set(modelName, Date.now() + 60000);
+        }
+        logger.warn('AI_AGENT', `Percobaan model ${modelName} gagal: ${err.message}. Mencoba model alternatif...`);
+      }
+    }
+
+    logger.error('AI_AGENT', 'Semua kandidat model Gemini AI gagal merespon.');
+    return null;
   }
 
   /**
@@ -292,120 +165,6 @@ export class AiAgent {
       const text = parts.map((p) => p.text).filter(Boolean).join('\n').trim();
       if (text.length > 0) return text;
     }
-    return null;
-  }
-
-  /**
-   * Memproses pesan teks pengguna dengan LLM Gemini + Autonomous Tool Calling
-   */
-  async processMessage({ effectivePhone, rawText, member, knownName, userIsAdmin }) {
-    if (!this.isAvailable() || !this.client) {
-      return null;
-    }
-
-    const currentEvent = this.eventManager.getEvent();
-    const context = { effectivePhone, knownName, member, userIsAdmin, currentEvent };
-
-    const systemInstruction = `
-Anda adalah Asisten AI Virtual Cerdas & Ramah dari Seksi Rohani & Musik NHKBP Kayu Putih.
-Tugas utama Anda:
-1. Menyapa jemaat/anggota naposobulung dengan hangat, sopan, dan bernuansa gerejawi (gunakan sapaan ramah seperti "Shalom Kak [Nama]! ✨" atau "Halo Kak [Nama]!").
-2. Membantu anggota mengonfirmasi kehadiran latihan paduan suara, mencatat jam estimasi jika terlambat, atau mencatat alasan jika berhalangan dengan memanggil tool "recordAttendance".
-3. Membantu anggota mengatur/mengubah seksi suara (Sopran 1/2, Alto 1/2, Tenor 1/2, Bass 1/2, Pemusik, Umum) dengan memanggil tool "updateVoiceSection".
-4. Membantu memperbarui nama lengkap ("updateMemberName") atau peran pelayanan ("updateMemberRole").
-5. Menjawab pertanyaan seputar jadwal latihan dan lokasi acara ("getEventSchedule") atau profil diri dan status kehadiran ("getMyProfile").
-
-Informasi Konteks Saat Ini:
-- Nama Pengirim: ${knownName || member?.name || 'Saudara/i'}
-- Nomor WA: ${effectivePhone}
-- Seksi Suara: ${member?.seksi || 'Belum ditentukan'}
-- Peran: ${member?.peran || 'Anggota Naposobulung'}
-- Status Admin: ${userIsAdmin ? 'YA (Pengurus)' : 'TIDAK'}
-- Acara Latihan Terdekat: ${currentEvent.namaAcara}
-- Waktu: ${currentEvent.waktuLatihan}
-- Lokasi: ${currentEvent.lokasi}
-- Tujuan: ${currentEvent.tujuan}
-- Batas Pengisian: ${currentEvent.batasWaktu}
-
-Panduan Sikap & Formatting:
-- Gunakan bahasa Indonesia yang santun, bersahabat, dan jelas.
-- Format pesan WhatsApp dengan rapi menggunakan bold (*teks*), italic (_teks_), dan emoji secukupnya.
-- Jika pengguna menanyakan status absensinya, panggil tool "getMyProfile" lalu laporkan statusnya secara ramah.
-- Hindari halusinasi data. Jangan mengarang jadwal acara atau status kehadiran tanpa mengecek tool atau konteks di atas.
-`.trim();
-
-    const candidateModels = [
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3.1-flash-lite',
-      'gemini-3.6-flash'
-    ];
-
-    logger.info('AI_AGENT', `Mengirim pesan ke Gemini AI: "${rawText}" dari ${effectivePhone}`);
-
-    for (const modelName of candidateModels) {
-      try {
-        const response = await this.client.models.generateContent({
-          model: modelName,
-          contents: rawText,
-          config: {
-            systemInstruction,
-            tools: this.getToolDeclarations()
-          }
-        });
-
-        // Cek apakah Gemini memanggil Function / Tool
-        const functionCalls = response.functionCalls ? response.functionCalls : [];
-
-        if (functionCalls.length > 0) {
-          const toolResponses = [];
-          for (const fc of functionCalls) {
-            const result = await this.executeTool(fc.name, fc.args || {}, context);
-            toolResponses.push({
-              name: fc.name,
-              response: result,
-              id: fc.id
-            });
-          }
-
-          // Kirim kembali hasil eksekusi tool ke Gemini untuk menghasilkan balasan percakapan final
-          const followUpResponse = await this.client.models.generateContent({
-            model: modelName,
-            contents: [
-              { role: 'user', parts: [{ text: rawText }] },
-              response.candidates[0].content,
-              {
-                role: 'user',
-                parts: toolResponses.map((tr) => ({
-                  functionResponse: {
-                    name: tr.name,
-                    response: tr.response,
-                    ...(tr.id ? { id: tr.id } : {})
-                  }
-                }))
-              }
-            ],
-            config: {
-              systemInstruction
-            }
-          });
-
-          const followUpText = this.extractText(followUpResponse);
-          if (followUpText) {
-            return followUpText;
-          }
-        }
-
-        const initialText = this.extractText(response);
-        if (initialText) {
-          return initialText;
-        }
-      } catch (err) {
-        logger.warn('AI_AGENT', `Percobaan model ${modelName} gagal: ${err.message}. Mencoba model alternatif jika ada...`);
-      }
-    }
-
-    logger.error('AI_AGENT', 'Semua kandidat model Gemini AI gagal merespon. Melanjutkan ke FSM fallback.');
     return null;
   }
 }
