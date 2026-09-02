@@ -1,13 +1,37 @@
-import { db as defaultDb } from './db.js';
+import { getDb } from './db.js';
 import { memberManager as defaultMemberManager } from './memberManager.js';
 import { eventManager as defaultEventManager } from './eventManager.js';
 import { logger } from './logger.js';
 
 export class AttendanceTracker {
-  constructor(dbInstance = defaultDb, memberMgr = defaultMemberManager, eventMgr = defaultEventManager) {
-    this.db = dbInstance;
-    this.memberManager = memberMgr;
-    this.eventManager = eventMgr;
+  constructor(dbInstance = null, memberMgr = null, eventMgr = null) {
+    this._db = dbInstance;
+    this._memberManager = memberMgr;
+    this._eventManager = eventMgr;
+  }
+
+  get db() {
+    return this._db || getDb();
+  }
+
+  set db(instance) {
+    this._db = instance;
+  }
+
+  get memberManager() {
+    return this._memberManager || defaultMemberManager;
+  }
+
+  set memberManager(instance) {
+    this._memberManager = instance;
+  }
+
+  get eventManager() {
+    return this._eventManager || defaultEventManager;
+  }
+
+  set eventManager(instance) {
+    this._eventManager = instance;
   }
 
   /**
@@ -172,7 +196,14 @@ export class AttendanceTracker {
     const evId = eventId || this.getActiveEventId();
     const event = this.eventManager.getEventById(evId) || this.eventManager.getEvent();
 
-    const rows = this.db.prepare('SELECT * FROM attendance_records WHERE event_id = ?').all(evId);
+    const rows = this.db.prepare(`
+      SELECT a.*, 
+             COALESCE(NULLIF(m.name, ''), a.name) as final_name,
+             COALESCE(m.seksi, a.seksi) as final_seksi
+      FROM attendance_records a
+      LEFT JOIN members m ON m.phone = a.phone
+      WHERE a.event_id = ?
+    `).all(evId);
 
     const targetKoor = {
       totalSent: 0,
@@ -185,14 +216,22 @@ export class AttendanceTracker {
       totalTidakHadir: 0,
       tidakHadir: 0,
       tidakHadirPendingAlasan: 0,
-      needsVerification: 0
+      needsVerification: 0,
+      hadirList: [],
+      tidakHadirList: []
     };
 
     const extraResponses = [];
     let overallTotalResponded = 0;
 
     for (const item of rows) {
-      const isTarget = item.seksi.toLowerCase() === 'targetkoor';
+      const seksi = (item.final_seksi || item.seksi || 'Umum').toLowerCase();
+      const isTarget = seksi === 'targetkoor';
+
+      // Skip isolated unverified slots from Target Koor summary
+      if (seksi === 'pendingverification' || seksi === 'unverifiedslot') {
+        continue;
+      }
 
       if (isTarget) {
         targetKoor.totalSent++;
@@ -204,10 +243,22 @@ export class AttendanceTracker {
           targetKoor.totalResponded++;
           targetKoor.hadirPendingJam++;
           overallTotalResponded++;
+          targetKoor.hadirList.push({
+            phone: item.phone,
+            name: item.final_name || item.name || 'Anggota Target',
+            detail: item.keterangan !== '-' ? item.keterangan : 'Hadir (Menunggu Jam)',
+            choice: 'Bisa'
+          });
         } else if (item.status === 'PARTIAL_TIDAK') {
           targetKoor.totalResponded++;
           targetKoor.tidakHadirPendingAlasan++;
           overallTotalResponded++;
+          targetKoor.tidakHadirList.push({
+            phone: item.phone,
+            name: item.final_name || item.name || 'Anggota Target',
+            detail: item.alasan !== '-' ? item.alasan : 'Tidak Bisa (Belum Beri Alasan)',
+            choice: 'Tidak Bisa'
+          });
         } else if (item.status === 'RESPONDED') {
           targetKoor.totalResponded++;
           overallTotalResponded++;
@@ -219,17 +270,30 @@ export class AttendanceTracker {
             } else {
               targetKoor.hadirPendingJam++;
             }
+            targetKoor.hadirList.push({
+              phone: item.phone,
+              name: item.final_name || item.name || 'Anggota Target',
+              detail: item.keterangan || 'On-Time',
+              choice: 'Bisa'
+            });
           } else if (item.attendance_choice === 'Tidak Bisa') {
             targetKoor.tidakHadir++;
+            targetKoor.tidakHadirList.push({
+              phone: item.phone,
+              name: item.final_name || item.name || 'Anggota Target',
+              detail: item.alasan || 'Tidak Bisa',
+              choice: 'Tidak Bisa'
+            });
           }
         }
       } else {
-        // Respon di luar Target (Umum / Anggota Baru)
+        // Respon di luar Target (Umum / Seksi Suara / Anggota Lain)
         if (item.status === 'RESPONDED' || item.status === 'PARTIAL_HADIR' || item.status === 'PARTIAL_TIDAK') {
           overallTotalResponded++;
           extraResponses.push({
             phone: item.phone,
-            name: item.name || 'Anggota',
+            name: item.final_name || item.name || 'Anggota',
+            seksi: item.final_seksi || item.seksi || 'Umum',
             status: item.attendance_choice || (item.status === 'PARTIAL_HADIR' ? 'Bisa' : 'Tidak Bisa'),
             keterangan: item.keterangan || '-',
             alasan: item.alasan || '-'

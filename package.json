@@ -8,7 +8,7 @@
     "start": "node index.js",
     "broadcast": "node src/broadcast.js",
     "remind": "node src/remind.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test \"test/*.test.js\""
   },
   "keywords": [
     "whatsapp",

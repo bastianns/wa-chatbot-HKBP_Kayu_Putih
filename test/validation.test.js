@@ -51,3 +51,25 @@ test('cleanNameInput - Pembersihan Sapaan Santai', async (t) => {
     assert.strictEqual(cleanNameInput('halo Daniel Nainggolan kak'), 'Daniel Nainggolan');
   });
 });
+
+test('parseSectionChoice - Klasifikasi Seksi Suara & Pilihan Umum', async (t) => {
+  const { parseSectionChoice } = await import('../src/responseParser.js');
+
+  await t.test('ekspresi ketidaktahuan umum tanpa frasa spesifik TIDAK langsung menjadi Umum', () => {
+    assert.strictEqual(parseSectionChoice('belum'), 'UNKNOWN', '"belum" tunggal harus UNKNOWN');
+    assert.strictEqual(parseSectionChoice('belum tau nih'), 'Umum', '"belum tau" harus Umum');
+    assert.strictEqual(parseSectionChoice('saya belum tahu mau masuk seksi apa'), 'Umum');
+    assert.strictEqual(parseSectionChoice('belum pilih'), 'Umum');
+    assert.strictEqual(parseSectionChoice('belum yakin kak'), 'Umum');
+  });
+
+  await t.test('pilihan angka dan nama seksi suara vokal terdeteksi presisi', () => {
+    assert.strictEqual(parseSectionChoice('1a'), 'Sopran 1');
+    assert.strictEqual(parseSectionChoice('sopran 1'), 'Sopran 1');
+    assert.strictEqual(parseSectionChoice('3b'), 'Tenor 2');
+    assert.strictEqual(parseSectionChoice('4'), 'Bass');
+    assert.strictEqual(parseSectionChoice('5'), 'Pemusik');
+    assert.strictEqual(parseSectionChoice('6'), 'Umum');
+    assert.strictEqual(parseSectionChoice('jemaat umum'), 'Umum');
+  });
+});

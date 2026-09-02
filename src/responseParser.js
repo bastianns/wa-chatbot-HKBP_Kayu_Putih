@@ -104,7 +104,7 @@ export function parseSectionChoice(rawText) {
   if (text === '5' || text.includes('musik') || text.includes('pemusik') || text.includes('musisi') || text.includes('keyboard') || text.includes('gitar') || text.includes('drum')) return 'Pemusik';
 
   // Umum
-  if (text === '6' || text.includes('umum') || text.includes('jemaat') || text.includes('belum')) return 'Umum';
+  if (text === '6' || text.includes('umum') || text.includes('jemaat') || /\bbelum (tau|tahu|pilih|yakin|menentukan)\b/i.test(text)) return 'Umum';
 
   return 'UNKNOWN';
 }

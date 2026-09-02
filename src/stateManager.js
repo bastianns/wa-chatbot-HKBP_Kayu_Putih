@@ -1,9 +1,17 @@
-import { db as defaultDb } from './db.js';
+import { getDb } from './db.js';
 
 export class StateManager {
-  constructor(dbInstance = defaultDb, timeoutMinutes = 1440) { // 24 jam timeout
-    this.db = dbInstance;
+  constructor(dbInstance = null, timeoutMinutes = 1440) { // 24 jam timeout
+    this._db = dbInstance;
     this.timeoutMs = timeoutMinutes * 60 * 1000;
+  }
+
+  get db() {
+    return this._db || getDb();
+  }
+
+  set db(instance) {
+    this._db = instance;
   }
 
   /**
@@ -66,7 +74,7 @@ export class StateManager {
   updateSession(userId, updates) {
     const session = this.getSession(userId);
     if (updates.step) session.step = updates.step;
-    if (updates.data) Object.assign(session.data, updates.data);
+    if (updates.data) session.data = updates.data;
     session.lastUpdated = Date.now();
 
     this.db.prepare(`

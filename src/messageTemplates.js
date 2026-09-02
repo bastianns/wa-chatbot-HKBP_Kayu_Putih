@@ -381,6 +381,54 @@ export const messageTemplates = {
   },
 
   /**
+   * Jadwal dan Informasi Acara Latihan Aktif
+   */
+  getEventScheduleMessage(event) {
+    return (
+      `📅 *JADWAL LATIHAN AKTIF*\n\n` +
+      `📌 *Acara:* ${event.namaAcara}\n` +
+      `🗓️ *Waktu:* ${event.waktuLatihan}\n` +
+      `📍 *Lokasi:* ${event.lokasi}\n` +
+      `🎯 *Tujuan:* ${event.tujuan}\n` +
+      `⏰ *Target On-Time:* ${event.targetOnTime || '19:00 WIB'}\n` +
+      `⏳ *Batas Konfirmasi:* ${event.batasWaktu || 'Sebelum latihan dimulai'}\n\n` +
+      `💡 _Ketik *absen* untuk mengisi konfirmasi kehadiran Kakak._`
+    );
+  },
+
+  /**
+   * Konfirmasi pembaruan seksi suara vokal
+   */
+  getSectionUpdateSuccessMessage(name, section) {
+    return (
+      `✅ Terima kasih Kak *${name}*! Seksi suara vokal Kakak berhasil diperbarui menjadi: *${section}*. 🙏\n\n` +
+      `Data ini otomatis disesuaikan di daftar hadir dan buku koor gereja. ✨`
+    );
+  },
+
+  /**
+   * Mask nomor telepon untuk privasi dan konfirmasi (contoh: 6281****599)
+   */
+  maskPhone(phone) {
+    if (!phone) return '';
+    const clean = phone.toString().replace(/[^0-9]/g, '');
+    if (clean.length <= 7) return clean;
+    const prefix = clean.slice(0, 4);
+    const suffix = clean.slice(-3);
+    return `${prefix}****${suffix}`;
+  },
+
+  /**
+   * Konfirmasi ganda sebelum mapping LID ke data member yang sudah ada
+   */
+  getLidConfirmationDoubleCheck(name, phone) {
+    const masked = this.maskPhone(phone);
+    return (
+      `Kami akan memetakan nomor WhatsApp Anda ke data *${name}* (${masked}). Apakah ini benar? Ketik *ya* untuk konfirmasi, atau *bukan* untuk mengulang.`
+    );
+  },
+
+  /**
    * Permintaan verifikasi nomor HP jika masuk dari akun WhatsApp LID baru
    */
   getLidVerificationRequest() {
@@ -402,17 +450,32 @@ export const messageTemplates = {
    * Template rekapitulasi real-time
    */
   getRekapMessage(event, summary) {
-    let extraHadir = summary.targetKoor.hadirPendingJam > 0 ? `\n• Menunggu Jam Tiba: *${summary.targetKoor.hadirPendingJam}* orang` : '';
-    let extraAbsen = summary.targetKoor.tidakHadirPendingAlasan > 0 ? `\n• Belum Beri Alasan: *${summary.targetKoor.tidakHadirPendingAlasan}* orang` : '';
-    let extraQuarantine = summary.targetKoor.needsVerification > 0 ? `\n• Butuh Verifikasi Nomor (LID Suspect): *${summary.targetKoor.needsVerification}* orang` : '';
+    let targetHadirText = '';
+    if (summary.targetKoor.hadirList && summary.targetKoor.hadirList.length > 0) {
+      summary.targetKoor.hadirList.forEach((item) => {
+        targetHadirText += `• *${item.name}*: ${item.detail}\n`;
+      });
+    } else {
+      targetHadirText = `• _(Belum ada)_\n`;
+    }
+
+    let targetTidakHadirText = '';
+    if (summary.targetKoor.tidakHadirList && summary.targetKoor.tidakHadirList.length > 0) {
+      summary.targetKoor.tidakHadirList.forEach((item) => {
+        targetTidakHadirText += `• *${item.name}*: ${item.detail}\n`;
+      });
+    } else {
+      targetTidakHadirText = `• _(Belum ada)_\n`;
+    }
 
     let extraText = '';
     if (summary.extraResponses && summary.extraResponses.length > 0) {
-      extraText = `\n\n👥 *TAMBAHAN RESPON DI LUAR TARGET (${summary.extraResponses.length} Orang):*\n`;
+      extraText = `\n👥 *RESPON ANGGOTA LAIN / SEKSI VOKAL (${summary.extraResponses.length} Orang):*\n`;
       summary.extraResponses.forEach((ex) => {
         const detail = ex.keterangan !== '-' ? ex.keterangan : (ex.alasan !== '-' ? ex.alasan : '');
         const detailStr = detail ? ` - ${detail}` : '';
-        extraText += `• *${ex.name}*: ${ex.status === 'Bisa' ? '✅ Hadir' : '❌ Tidak Hadir'}${detailStr}\n`;
+        const seksiStr = (ex.seksi && ex.seksi !== 'Umum' && ex.seksi !== 'TargetKoor') ? ` (${ex.seksi})` : '';
+        extraText += `• *${ex.name}*${seksiStr}: ${ex.status === 'Bisa' ? '✅ Hadir' : '❌ Tidak Hadir'}${detailStr}\n`;
       });
     }
 
@@ -421,18 +484,13 @@ export const messageTemplates = {
       `🗓️ ${event.waktuLatihan}\n` +
       `------------------------------------\n` +
       `🎯 *TARGET KHUSUS KOOR (${summary.targetKoor.totalSent} Orang):*\n` +
-      `• Terkonfirmasi Valid: *${summary.targetKoor.totalResponded}* orang\n` +
-      `• Belum Merespon: *${summary.targetKoor.belumBalasSamaSekali}* orang` +
-      extraQuarantine + `\n\n` +
-      `*🟢 Rincian Hadir Target (${summary.targetKoor.totalHadir} Orang):*\n` +
-      `• On-Time (19:00): *${summary.targetKoor.hadirOnTime}* orang\n` +
-      `• Telat: *${summary.targetKoor.hadirTelat}* orang` +
-      extraHadir + `\n\n` +
-      `*🔴 Rincian Tidak Hadir Target (${summary.targetKoor.totalTidakHadir} Orang):*\n` +
-      `• Sudah Ada Alasan: *${summary.targetKoor.tidakHadir}* orang` +
-      extraAbsen +
+      `• Terkonfirmasi: *${summary.targetKoor.totalResponded}* orang | Belum Respon: *${summary.targetKoor.belumBalasSamaSekali}* orang\n\n` +
+      `*🟢 Target Hadir (${summary.targetKoor.totalHadir} Orang):*\n` +
+      targetHadirText + '\n' +
+      `*🔴 Target Tidak Hadir (${summary.targetKoor.totalTidakHadir} Orang):*\n` +
+      targetTidakHadirText +
       extraText +
-      `\n------------------------------------\n` +
+      `------------------------------------\n` +
       `📈 *Total Keseluruhan Konfirmasi Masuk:* *${summary.overallTotalResponded}* orang\n\n` +
       `💡 _Ketik *pending* untuk melihat daftar nomor target yang belum membalas._`
     );

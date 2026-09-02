@@ -256,6 +256,182 @@ async function startBackgroundReminder(sock, adminJid) {
 }
 
 /**
+ * Memproses output intent terstruktur dari AI Agent secara lokal.
+ * Semua personalisasi (nama anggota, nomor HP, peran) dan mutasi database dilakukan di sini.
+ */
+async function handleAiIntent({
+  aiResult,
+  sock,
+  remoteJid,
+  sessionKey,
+  session,
+  effectivePhone,
+  knownName,
+  member,
+  currentEvent,
+  userIsAdmin
+}) {
+  if (!aiResult || !aiResult.intent || aiResult.intent === 'UNKNOWN') {
+    return false;
+  }
+
+  const memberName = knownName || member?.name || 'Saudara/i';
+  const memberSeksi = member?.seksi || 'Umum';
+
+  switch (aiResult.intent) {
+    case 'ATTENDANCE_YES_ONTIME': {
+      const payload = {
+        nama: memberName,
+        seksi: memberSeksi,
+        status: 'Bisa',
+        keterangan: `On-Time (${currentEvent.targetOnTime || '19:00 WIB'})`,
+        alasan: '-',
+        namaAcara: currentEvent.namaAcara,
+        tanggalLatihan: currentEvent.waktuLatihan,
+        nomorWa: effectivePhone
+      };
+      attendanceTracker.markResponded(effectivePhone, payload, 'RESPONDED', currentEvent.id);
+      await sendToGoogleSheets(payload);
+      stateManager.clearSession(sessionKey);
+      await sendMessage(sock, remoteJid, messageTemplates.getSuccessOnTimeMessage(memberName, currentEvent));
+      return true;
+    }
+
+    case 'ATTENDANCE_YES_LATE': {
+      const arrivalTime = aiResult.arrivalTime || 'Menyusul';
+      const payload = {
+        nama: memberName,
+        seksi: memberSeksi,
+        status: 'Bisa',
+        keterangan: `Telat (${arrivalTime})`,
+        alasan: '-',
+        namaAcara: currentEvent.namaAcara,
+        tanggalLatihan: currentEvent.waktuLatihan,
+        nomorWa: effectivePhone
+      };
+      attendanceTracker.markResponded(effectivePhone, payload, 'RESPONDED', currentEvent.id);
+      await sendToGoogleSheets(payload);
+      stateManager.clearSession(sessionKey);
+      await sendMessage(sock, remoteJid, messageTemplates.getSuccessLateMessage(memberName, currentEvent, arrivalTime));
+      return true;
+    }
+
+    case 'ATTENDANCE_YES_PENDING_TIME': {
+      const payload = {
+        nama: memberName,
+        seksi: memberSeksi,
+        status: 'Bisa',
+        keterangan: 'Hadir (Menunggu jam)',
+        alasan: '-',
+        namaAcara: currentEvent.namaAcara,
+        tanggalLatihan: currentEvent.waktuLatihan,
+        nomorWa: effectivePhone
+      };
+      attendanceTracker.markResponded(effectivePhone, payload, 'PARTIAL_HADIR', currentEvent.id);
+      session.step = 'WAITING_LATE_TIME';
+      session.data.status = 'Bisa';
+      session.data.keterangan = 'Telat';
+      stateManager.updateSession(sessionKey, session);
+      await sendMessage(sock, remoteJid, messageTemplates.getAskLateTimeMessage());
+      return true;
+    }
+
+    case 'ATTENDANCE_NO': {
+      const reason = aiResult.reason || 'Berhalangan';
+      const payload = {
+        nama: memberName,
+        seksi: memberSeksi,
+        status: 'Tidak Bisa',
+        keterangan: '-',
+        alasan: reason,
+        namaAcara: currentEvent.namaAcara,
+        tanggalLatihan: currentEvent.waktuLatihan,
+        nomorWa: effectivePhone
+      };
+      attendanceTracker.markResponded(effectivePhone, payload, 'RESPONDED', currentEvent.id);
+      await sendToGoogleSheets(payload);
+      stateManager.clearSession(sessionKey);
+      await sendMessage(sock, remoteJid, messageTemplates.getSuccessReasonMessage(memberName, reason));
+      return true;
+    }
+
+    case 'UPDATE_VOICE_SECTION': {
+      const parsed = parseSectionChoice(aiResult.section);
+      const finalSection = parsed !== 'UNKNOWN' ? parsed : aiResult.section;
+      if (finalSection) {
+        memberManager.registerOrUpdate(effectivePhone, memberName, finalSection, 'NHKBP Kayu Putih');
+        const now = new Date().toISOString();
+        attendanceTracker.db.prepare('UPDATE attendance_records SET seksi = ?, updated_at = ? WHERE event_id = ? AND phone = ?')
+          .run(finalSection, now, currentEvent.id, effectivePhone);
+        await sendMessage(sock, remoteJid, messageTemplates.getSectionUpdateSuccessMessage(memberName, finalSection));
+        return true;
+      }
+      return false;
+    }
+
+    case 'UPDATE_NAME': {
+      const cleaned = cleanNameInput(aiResult.newName);
+      if (isValidName(cleaned)) {
+        const now = new Date().toISOString();
+        memberManager.registerOrUpdate(effectivePhone, cleaned, memberSeksi, 'NHKBP Kayu Putih');
+        attendanceTracker.db.prepare('UPDATE attendance_records SET name = ?, updated_at = ? WHERE event_id = ? AND phone = ?')
+          .run(cleaned, now, currentEvent.id, effectivePhone);
+        await sendMessage(sock, remoteJid, `✅ Terima kasih Kak! Nama lengkap Anda berhasil diperbarui menjadi: *${cleaned}*. 🙏`);
+        return true;
+      }
+      return false;
+    }
+
+    case 'UPDATE_ROLE': {
+      if (aiResult.role) {
+        memberManager.updatePeran(effectivePhone, aiResult.role);
+        await sendMessage(sock, remoteJid, `✅ Bidang pelayanan/peran Kakak berhasil diperbarui menjadi: *${aiResult.role}*. 🙏`);
+        return true;
+      }
+      return false;
+    }
+
+    case 'ASK_SCHEDULE': {
+      await sendMessage(sock, remoteJid, messageTemplates.getEventScheduleMessage(currentEvent));
+      return true;
+    }
+
+    case 'ASK_PROFILE': {
+      const att = attendanceTracker.getAttendance(effectivePhone, currentEvent.id);
+      await sendMessage(
+        sock,
+        remoteJid,
+        messageTemplates.getMemberProfileMessage(
+          memberName,
+          effectivePhone,
+          memberSeksi,
+          userIsAdmin,
+          currentEvent,
+          att,
+          member?.peran
+        )
+      );
+      return true;
+    }
+
+    case 'CASUAL_CHAT': {
+      const reply = aiResult.replyText || messageTemplates.getCasualGreetingMessage(
+        memberName,
+        currentEvent,
+        attendanceTracker.getAttendance(effectivePhone, currentEvent.id),
+        memberSeksi,
+        userIsAdmin
+      );
+      await sendMessage(sock, remoteJid, reply);
+      return true;
+    }
+
+    default:
+      return false;
+  }
+}
+
+/**
  * Handle pesan masuk dari WhatsApp
  */
 export async function handleIncomingMessage(sock, m) {
@@ -322,7 +498,12 @@ export async function handleIncomingMessage(sock, m) {
   }
 
   // Command Profil Saya / Status
-  if (cleanText === '/profil' || cleanText === 'profil' || cleanText === 'saya' || cleanText === '/saya' || cleanText === 'info' || cleanText === 'status' || cleanText === '/status') {
+  const isProfileOrStatusCommand =
+    ['/profil', 'profil', 'saya', '/saya', 'info', '/info', 'status', '/status'].includes(cleanText) ||
+    /^(cek|lihat|info)\s+(status|absen|absensi|kehadiran|profil|profilku|statusku)(\s+(saya|absen|absensi|latihan|koor))?$/i.test(cleanText) ||
+    /^(status|profil)\s+(absen|absensi|kehadiran|saya|ku|latihan|koor)$/i.test(cleanText);
+
+  if (isProfileOrStatusCommand) {
     const currentEvent = eventManager.getEvent();
     const att = attendanceTracker.getAttendance(effectivePhone, currentEvent?.id);
     const profileMsg = messageTemplates.getMemberProfileMessage(
@@ -600,6 +781,25 @@ export async function handleIncomingMessage(sock, m) {
     // cari / /cari [nama / nomor] / cek / /cek
     if (cleanText.startsWith('/cari') || cleanText.startsWith('cari') || cleanText.startsWith('/cek') || cleanText.startsWith('cek')) {
       const keyword = rawText.replace(/^\/?(cari|cek)/i, '').trim();
+      const lowerKw = keyword.toLowerCase();
+
+      // Jika yang dicek adalah status / profil diri sendiri
+      if (['status', 'absen', 'absensi', 'kehadiran', 'profil', 'saya', 'status absen', 'status absensi', 'status saya'].includes(lowerKw)) {
+        const currentEvent = eventManager.getEvent();
+        const att = attendanceTracker.getAttendance(effectivePhone, currentEvent?.id);
+        const profileMsg = messageTemplates.getMemberProfileMessage(
+          knownName || member?.name,
+          effectivePhone,
+          member?.seksi,
+          userIsAdmin,
+          currentEvent,
+          att,
+          member?.peran
+        );
+        await sendMessage(sock, remoteJid, profileMsg);
+        return;
+      }
+
       if (!keyword) {
         await sendMessage(
           sock,
@@ -691,7 +891,7 @@ export async function handleIncomingMessage(sock, m) {
   // =========================================================================
 
   // Jika admin, pastikan tidak tersangkut di WAITING_NAME_REGISTRATION / WAITING_LID
-  if (userIsAdmin && (session.step === 'WAITING_NAME_REGISTRATION' || session.step === 'WAITING_LID_PHONE_CONFIRMATION')) {
+  if (userIsAdmin && (session.step === 'WAITING_NAME_REGISTRATION' || session.step === 'WAITING_LID_PHONE_CONFIRMATION' || session.step === 'WAITING_LID_PHONE_CONFIRM_DOUBLE_CHECK')) {
     session.step = 'IDLE';
   }
 
@@ -700,20 +900,22 @@ export async function handleIncomingMessage(sock, m) {
     const inputPhone = rawText.replace(/[^0-9+]/g, '');
     if (memberManager.isValidIndonesianPhone(inputPhone)) {
       const normalizedInput = memberManager.normalizePhone(inputPhone);
-      memberManager.setLidMapping(senderPhone, normalizedInput);
+      const candidateMember = memberManager.findMember(normalizedInput);
 
-      const resolvedMember = memberManager.findMember(normalizedInput);
-      if (resolvedMember && isValidName(resolvedMember.name)) {
-        session.data.nama = resolvedMember.name;
-        session.data.seksi = resolvedMember.seksi || 'Umum';
-        session.data.nomorWa = normalizedInput;
-        session.step = 'WAITING_ATTENDANCE';
+      if (candidateMember && isValidName(candidateMember.name)) {
+        // Jangan panggil setLidMapping dulu! Minta konfirmasi ganda
+        session.step = 'WAITING_LID_PHONE_CONFIRM_DOUBLE_CHECK';
+        session.data.candidatePhone = normalizedInput;
+        session.data.candidateName = candidateMember.name;
+        session.data.candidateSeksi = candidateMember.seksi || 'Umum';
         stateManager.updateSession(sessionKey, session);
 
-        await sendMessage(sock, remoteJid, messageTemplates.getLidVerificationSuccess(normalizedInput));
-        await sendMessage(sock, remoteJid, messageTemplates.getKnownMemberGreeting(resolvedMember.name, currentEvent));
+        const doubleCheckMsg = messageTemplates.getLidConfirmationDoubleCheck(candidateMember.name, normalizedInput);
+        await sendMessage(sock, remoteJid, doubleCheckMsg);
         return;
       } else {
+        // Nomor baru (tidak ada risiko tertukar dengan member yang sudah ada)
+        memberManager.setLidMapping(senderPhone, normalizedInput, 'NEW_MEMBER_ONBOARDING');
         session.data.nomorWa = normalizedInput;
         session.step = 'WAITING_NAME_REGISTRATION';
         stateManager.updateSession(sessionKey, session);
@@ -724,6 +926,53 @@ export async function handleIncomingMessage(sock, m) {
       }
     } else {
       await sendMessage(sock, remoteJid, `Mohon masukkan format nomor HP WhatsApp yang benar yaa (contoh: *08123456789* atau *628123456789*). 🙏`);
+      return;
+    }
+  }
+
+  // Handle Double Check Konfirmasi Pemetaan LID ke Akun Member yang Sudah Ada
+  if (session.step === 'WAITING_LID_PHONE_CONFIRM_DOUBLE_CHECK') {
+    const isAffirmative = /^(ya|benar|betul|y|yes|iya|iyo|yoi|betul kak|ya benar|iya kak)$/i.test(cleanText);
+    const isNegative = /^(bukan|salah|tidak|gak|ngga|nggak|bukan kak|no|batal|ulang)$/i.test(cleanText);
+
+    if (isAffirmative) {
+      const confirmedPhone = session.data.candidatePhone;
+      const confirmedName = session.data.candidateName;
+      const confirmedSeksi = session.data.candidateSeksi || 'Umum';
+
+      memberManager.setLidMapping(senderPhone, confirmedPhone, 'USER_CONFIRMED_IDENTITY');
+
+      session.data.nama = confirmedName;
+      session.data.seksi = confirmedSeksi;
+      session.data.nomorWa = confirmedPhone;
+      session.step = 'WAITING_ATTENDANCE';
+      delete session.data.candidatePhone;
+      delete session.data.candidateName;
+      delete session.data.candidateSeksi;
+      stateManager.updateSession(sessionKey, session);
+
+      await sendMessage(sock, remoteJid, messageTemplates.getLidVerificationSuccess(confirmedPhone));
+      await sendMessage(sock, remoteJid, messageTemplates.getKnownMemberGreeting(confirmedName, currentEvent));
+      return;
+    } else if (isNegative) {
+      session.step = 'WAITING_LID_PHONE_CONFIRMATION';
+      delete session.data.candidatePhone;
+      delete session.data.candidateName;
+      delete session.data.candidateSeksi;
+      stateManager.updateSession(sessionKey, session);
+
+      await sendMessage(
+        sock,
+        remoteJid,
+        `Baik, pemetaan dibatalkan. Silakan ketik *Nomor HP WhatsApp* Anda yang benar yaa:\n\n_(Contoh: *08123456789* atau *628123456789*)_`
+      );
+      return;
+    } else {
+      await sendMessage(
+        sock,
+        remoteJid,
+        `Mohon ketik *ya* jika data Anda benar, atau ketik *bukan* untuk memasukkan nomor HP lain. 🙏`
+      );
       return;
     }
   }
@@ -888,22 +1137,50 @@ export async function handleIncomingMessage(sock, m) {
   // =========================================================================
   if (aiAgent.isAvailable() && !isGenericGreeting) {
     const isSingleNumber = /^[1-6]$/.test(cleanText);
+    const isSingleLetterOption = /^[a-fA-F]$/.test(cleanText) || /^[1-4][a-bA-B]$/.test(cleanText);
     const isStrictYesNo = ['bisa', 'tidak', 'tidak bisa', 'hadir', 'absen', 'ya', 'gak', 'ngga', 'nggak'].includes(cleanText);
-    const shouldLetFsmHandle = (session.step !== 'IDLE') && (isSingleNumber || isStrictYesNo);
+
+    let isDirectFsmMatch = false;
+    if (session.step === 'WAITING_ATTENDANCE') {
+      isDirectFsmMatch = parseAttendanceChoice(cleanText) !== 'UNKNOWN';
+    } else if (session.step === 'WAITING_ONTIME') {
+      isDirectFsmMatch = parseTimeChoice(cleanText) !== 'UNKNOWN';
+    } else if (session.step === 'WAITING_SECTION_REGISTRATION') {
+      isDirectFsmMatch = parseSectionChoice(cleanText) !== 'UNKNOWN';
+    }
+
+    const isDirectInputFsmStep = ['WAITING_ONTIME', 'WAITING_LATE_TIME', 'WAITING_REASON', 'WAITING_NAME_UPDATE', 'WAITING_ROLE_UPDATE'].includes(session.step);
+    const shouldLetFsmHandle = (session.step !== 'IDLE') && (isDirectInputFsmStep || isSingleNumber || isSingleLetterOption || isStrictYesNo || isDirectFsmMatch);
 
     if (!shouldLetFsmHandle) {
-      const aiReply = await aiAgent.processMessage({
-        effectivePhone,
+      const eventContext = {
+        namaAcara: currentEvent.namaAcara,
+        waktuLatihan: currentEvent.waktuLatihan,
+        lokasi: currentEvent.lokasi,
+        targetOnTime: currentEvent.targetOnTime,
+        batasWaktu: currentEvent.batasWaktu
+      };
+
+      const aiResult = await aiAgent.processMessage({
         rawText,
-        member,
-        knownName,
-        userIsAdmin
+        eventContext
       });
 
-      if (aiReply) {
-        stateManager.clearSession(sessionKey);
-        await sendMessage(sock, remoteJid, aiReply);
-        return;
+      if (aiResult) {
+        const handled = await handleAiIntent({
+          aiResult,
+          sock,
+          remoteJid,
+          sessionKey,
+          session,
+          effectivePhone,
+          knownName,
+          member,
+          currentEvent,
+          userIsAdmin
+        });
+
+        if (handled) return;
       }
     }
   }
@@ -1000,17 +1277,34 @@ export async function handleIncomingMessage(sock, m) {
 
       // Coba proses dengan AI Agent Gemini jika tersedia
       if (aiAgent.isAvailable() && !isGenericGreeting) {
-        const aiReply = await aiAgent.processMessage({
-          effectivePhone,
+        const eventContext = {
+          namaAcara: currentEvent.namaAcara,
+          waktuLatihan: currentEvent.waktuLatihan,
+          lokasi: currentEvent.lokasi,
+          targetOnTime: currentEvent.targetOnTime,
+          batasWaktu: currentEvent.batasWaktu
+        };
+
+        const aiResult = await aiAgent.processMessage({
           rawText,
-          member,
-          knownName,
-          userIsAdmin
+          eventContext
         });
 
-        if (aiReply) {
-          await sendMessage(sock, remoteJid, aiReply);
-          return;
+        if (aiResult) {
+          const handled = await handleAiIntent({
+            aiResult,
+            sock,
+            remoteJid,
+            sessionKey,
+            session,
+            effectivePhone,
+            knownName,
+            member,
+            currentEvent,
+            userIsAdmin
+          });
+
+          if (handled) return;
         }
       }
 

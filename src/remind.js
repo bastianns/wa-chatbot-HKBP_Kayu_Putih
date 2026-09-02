@@ -1,5 +1,6 @@
 import path from 'path';
 import { config } from '../config.js';
+import { getDb, migrateJsonToSqlite } from './db.js';
 import { eventManager } from './eventManager.js';
 import { attendanceTracker } from './attendanceTracker.js';
 import { resolveReminderState } from './botHandler.js';
@@ -17,6 +18,10 @@ function getRandomDelay(min, max) {
 }
 
 async function main() {
+  // Inisialisasi eksplisit database dan migrasi
+  const db = getDb();
+  migrateJsonToSqlite(db);
+
   const currentEvent = eventManager.getEvent();
 
   await createWASocketSession({

@@ -1,6 +1,7 @@
 import path from 'path';
 import { handleIncomingMessage } from './src/botHandler.js';
 import { config } from './config.js';
+import { getDb, migrateJsonToSqlite } from './src/db.js';
 import { eventManager } from './src/eventManager.js';
 import { memberManager } from './src/memberManager.js';
 import { createWASocketSession } from './src/connectionHelper.js';
@@ -23,6 +24,10 @@ function checkSecurityAndConfig() {
 
 async function startBot() {
   checkSecurityAndConfig();
+
+  // Inisialisasi eksplisit database dan migrasi
+  const db = getDb();
+  migrateJsonToSqlite(db);
 
   const ev = eventManager.getEvent();
   const counts = memberManager.getCounts();

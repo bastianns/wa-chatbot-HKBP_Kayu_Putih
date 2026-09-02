@@ -1,9 +1,17 @@
-import { db as defaultDb } from './db.js';
+import { getDb } from './db.js';
 import { logger } from './logger.js';
 
 export class EventManager {
-  constructor(dbInstance = defaultDb) {
-    this.db = dbInstance;
+  constructor(dbInstance = null) {
+    this._db = dbInstance;
+  }
+
+  get db() {
+    return this._db || getDb();
+  }
+
+  set db(instance) {
+    this._db = instance;
   }
 
   /**

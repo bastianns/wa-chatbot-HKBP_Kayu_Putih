@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { db } from '../src/db.js';
+import { createDatabase } from '../src/db.js';
 import { config } from '../config.js';
 import { handleIncomingMessage } from '../src/botHandler.js';
 import { stateManager } from '../src/stateManager.js';
@@ -16,8 +16,12 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
     json: async () => ({ status: 'success', message: 'mocked' })
   });
 
-  // Simpan state event asli agar tidak terpolusi oleh unit test
-  const originalEvent = eventManager.getEvent();
+  // Gunakan database isolated in-memory untuk seluruh singletons
+  const memDb = createDatabase(':memory:');
+  memberManager.db = memDb;
+  stateManager.db = memDb;
+  eventManager.db = memDb;
+  attendanceTracker.db = memDb;
 
   // Setup data pengujian
   const adminPhone = '6281200000001';
@@ -26,11 +30,6 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
   const memberJid = `${memberPhone}@s.whatsapp.net`;
   const strangerPhone = '6289977778888';
   const strangerJid = `${strangerPhone}@s.whatsapp.net`;
-
-  // Bersihkan data pengujian dari database agar terisolasi
-  db.prepare('DELETE FROM members WHERE phone IN (?, ?, ?)').run(adminPhone, memberPhone, strangerPhone);
-  db.prepare('DELETE FROM sessions WHERE jid IN (?, ?, ?)').run(adminJid, memberJid, strangerJid);
-  db.prepare('DELETE FROM attendance_records WHERE phone IN (?, ?, ?)').run(adminPhone, memberPhone, strangerPhone);
 
   // Daftarkan Admin di DB
   memberManager.registerOrUpdate(adminPhone, 'Bastian Sibarani (Admin)', 'Pengurus', 'NHKBP Kayu Putih', 1);
@@ -108,7 +107,7 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
 
   await t.test('6. Alur Pendaftaran Anggota Baru, Validasi Nama & Pilihan Seksi Suara', async () => {
     stateManager.clearSession(memberJid);
-    db.prepare('DELETE FROM members WHERE phone = ?').run(memberPhone);
+    memDb.prepare('DELETE FROM members WHERE phone = ?').run(memberPhone);
 
     let r = await sendMsg(memberJid, 'Halo');
     assert.strictEqual(r.includes('Nama Lengkap'), true);
@@ -180,7 +179,7 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
 
   await t.test('11. Verifikasi pushName tidak membypass registrasi nama resmi', async () => {
     stateManager.clearSession(strangerJid);
-    db.prepare('DELETE FROM members WHERE phone = ?').run(strangerPhone);
+    memDb.prepare('DELETE FROM members WHERE phone = ?').run(strangerPhone);
 
     // Kirim pesan pertama kali dengan pushName ada di metadata WA
     let r = await sendMsg(strangerJid, 'Halo bot', 'Grace Simanjuntak');
@@ -249,12 +248,20 @@ test('Alur Percakapan WhatsApp Bot (State Machine & Admin Commands)', async (t) 
     assert.strictEqual(prof.includes('Peran / Pelayanan:* *Song Leader*'), true);
   });
 
-  // Bersihkan kembali setelah selesai
-  db.prepare('DELETE FROM members WHERE phone IN (?, ?, ?)').run(adminPhone, memberPhone, strangerPhone);
-  db.prepare('DELETE FROM sessions WHERE jid IN (?, ?, ?)').run(adminJid, memberJid, strangerJid);
-  db.prepare('DELETE FROM attendance_records WHERE phone IN (?, ?, ?)').run(adminPhone, memberPhone, strangerPhone);
+  await t.test('17. Variasi Natural Cek Status / Absensi (cek status absen)', async () => {
+    stateManager.clearSession(memberJid);
+    const r1 = await sendMsg(memberJid, 'cek status absen');
+    assert.strictEqual(r1.includes('PROFIL & STATUS LATIHAN'), true);
 
-  if (originalEvent) {
-    eventManager.updateEvent(originalEvent);
-  }
+    const r2 = await sendMsg(adminJid, 'cek status absen');
+    assert.strictEqual(r2.includes('PROFIL & STATUS LATIHAN'), true);
+  });
+
+  await t.test('18. Direct FSM Letter Choice (Bisa -> B (Telat))', async () => {
+    stateManager.clearSession(memberJid);
+    await sendMsg(memberJid, 'absen');
+    await sendMsg(memberJid, '1');
+    const r = await sendMsg(memberJid, 'B');
+    assert.strictEqual(r.includes('Siap dicatat telat'), true);
+  });
 });
